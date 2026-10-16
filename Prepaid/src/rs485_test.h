@@ -7,6 +7,16 @@
 #define SLAVE_HOLDING_REGISTER_COUNT 50
 #define SLAVE_RELAY_COUNT 3
 
+/* Zero-based offsets in the 40001..40050 slave holding-register table. */
+#define SLAVE_PORT1_BAUD_HIGH_OFFSET 7
+#define SLAVE_PORT1_BAUD_LOW_OFFSET  8
+#define SLAVE_PORT1_PARITY_OFFSET    9
+#define SLAVE_PORT1_ID_OFFSET       10
+#define SLAVE_PORT2_BAUD_HIGH_OFFSET 11
+#define SLAVE_PORT2_BAUD_LOW_OFFSET  12
+#define SLAVE_PORT2_PARITY_OFFSET    13
+#define SLAVE_PORT2_ID_OFFSET       14
+
 /* Add these globals to Keil Watch 1 while the target is running. */
 extern volatile uint8_t energy_meter_connected;
 extern volatile uint8_t energy_meter_data_valid;

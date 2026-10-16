@@ -1,0 +1,56 @@
+# =========================================
+# STM32CubeIDE / STM32CubeMX Git Ignore File
+# Keeps auto-generated code
+# Ignores build outputs only
+# =========================================
+
+# Build folders
+/Debug/
+/Release/
+
+# CubeIDE build intermediate files
+**/build/
+**/.externalToolBuilders/
+
+# Object and dependency files
+*.o
+*.d
+*.lst
+*.map
+*.axf
+*.elf
+*.bin
+*.hex
+*.srec
+
+# Backup / temp files
+*~
+*.bak
+*.tmp
+*.swp
+*.log
+
+# Core dump / crash files 
+*.stackdump
+
+# OS-specific
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# STM32CubeIDE metadata (optional: keep if you use workspace sharing)
+# Uncomment below to ignore IDE-specific metadata
+# .project
+# .cproject
+# .mxproject
+# .settings/
+
+# User-generated folders to ignore (optional)
+# /Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_*.c
+
+# =============================
+# Notes:
+# - All source (.c, .h, .ioc) are tracked
+# - Auto-generated code is kept
+# - Only build products and IDE cache are ignored
+# =============================

@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:01:51 PAGE 1   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:44:19 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE BOARD_IO
@@ -62,7 +62,7 @@ line level    source
   50   1          BOARD_BUZZER_PIN = 0;
   51   1      
   52   1          P01_PUSHPULL_MODE;
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:01:51 PAGE 2   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:44:19 PAGE 2   
 
   53   1          P00_PUSHPULL_MODE;
   54   1          P03_PUSHPULL_MODE;
@@ -126,7 +126,7 @@ line level    source
  112   1          RELAY_RESET_2_PIN = 0;
  113   1          RELAY_RESET_3_PIN = 0;
  114   1      }
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:01:51 PAGE 3   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:44:19 PAGE 3   
 
  115          
  116          void Board_PulseRelay(uint8_t channel, uint8_t turn_on, uint16_t milliseconds)
@@ -190,7 +190,7 @@ line level    source
  174   1      
  175   1          events = 0;
  176   1          button_mask = BOARD_SWITCH_1;
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:01:51 PAGE 4   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:44:19 PAGE 4   
 
  177   1          for (button_index = 0; button_index < 3; button_index++)
  178   1          {
@@ -254,7 +254,7 @@ line level    source
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
    CODE SIZE        =    750    ----
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:01:51 PAGE 5   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/16/2026 17:44:19 PAGE 5   
 
    CONSTANT SIZE    =   ----    ----
    XDATA SIZE       =      7       2
