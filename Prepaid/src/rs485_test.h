@@ -4,6 +4,8 @@
 #include "ms51_device.h"
 
 #define ENERGY_METER_REGISTER_COUNT 4
+#define SLAVE_HOLDING_REGISTER_COUNT 50
+#define SLAVE_RELAY_COUNT 3
 
 /* Add these globals to Keil Watch 1 while the target is running. */
 extern volatile uint8_t energy_meter_connected;
@@ -31,6 +33,8 @@ extern volatile uint8_t meter_eeprom_last_error;
 extern volatile uint16_t meter_eeprom_save_count;
 extern volatile uint16_t xdata energy_meter_registers[ENERGY_METER_REGISTER_COUNT];
 extern volatile uint16_t xdata s_energy_meter_registers[ENERGY_METER_REGISTER_COUNT];
+extern volatile uint16_t xdata slave_holding_registers[SLAVE_HOLDING_REGISTER_COUNT];
+extern volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
 
 /* energy_meter_last_error values */
 #define ENERGY_METER_ERROR_NONE          0

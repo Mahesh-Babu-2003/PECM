@@ -1,10 +1,10 @@
-A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 10:05:23 PAGE     1
+A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 17:01:52 PAGE     1
 
 
 MACRO ASSEMBLER A51 V8.2.7.0
 OBJECT MODULE PLACED IN .\Output\STARTUP.obj
-ASSEMBLER INVOKED BY: C:\Keil_v5\C51\BIN\A51.EXE vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51P
-                      C0AE\Library\Startup\KEIL\STARTUP.A51 SET(LARGE) DEBUG PRINT(.\lst\STARTUP.lst) OBJECT(.\Output\STARTUP.obj) EP
+ASSEMBLER INVOKED BY: D:\Applications\C51\BIN\A51.EXE vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_
+                      MS51PC0AE\Library\Startup\KEIL\STARTUP.A51 SET(LARGE) DEBUG PRINT(.\lst\STARTUP.lst) OBJECT(.\Output\STARTUP.obj) EP
 
 LOC  OBJ            LINE     SOURCE
 
@@ -65,7 +65,7 @@ LOC  OBJ            LINE     SOURCE
                       55     ;------------------------------------------------------------------------------
                       56     ;
                       57     ;  Page Definition for Using the Compact Model with 64 KByte xdata RAM
-A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 10:05:23 PAGE     2
+A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 17:01:52 PAGE     2
 
                       58     ;
                       59     ;  The following EQU statements define the xdata page used for pdata
@@ -133,7 +133,7 @@ LOC  OBJ            LINE     SOURCE
                                              MOV     R6,#HIGH (XDATALEN)
                                ENDIF
 000D E4              123                     CLR     A
-A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 10:05:23 PAGE     3
+A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 17:01:52 PAGE     3
 
 000E F0              124     XDATALOOP:      MOVX    @DPTR,A
 000F A3              125                     INC     DPTR
@@ -179,7 +179,7 @@ LOC  OBJ            LINE     SOURCE
 0017 020000   F      165                     LJMP    ?C_START
                      166     
                      167                     END
-A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 10:05:23 PAGE     4
+A51 MACRO ASSEMBLER  STARTUP                                                              10/16/2026 17:01:52 PAGE     4
 
 SYMBOL TABLE LISTING
 ------ ----- -------

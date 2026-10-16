@@ -7,11 +7,12 @@
 #define METER_BAUD_RATE         9600UL
 #define METER_REGISTER_START    0
 #define METER_REGISTER_COUNT    ENERGY_METER_REGISTER_COUNT
-#define SLAVE_REGISTER_COUNT    METER_REGISTER_COUNT
+#define SLAVE_REGISTER_COUNT    SLAVE_HOLDING_REGISTER_COUNT
+#define SLAVE_RELAY_START       ENERGY_METER_REGISTER_COUNT
 #define RTU_FRAME_GAP_MS        4
 #define MASTER_TIMEOUT_MS       300
 #define MASTER_POLL_INTERVAL_MS 1000
-#define RX_BUFFER_SIZE          48
+#define RX_BUFFER_SIZE          128
 #define METER_EEPROM_ADDRESS    0x50
 #define METER_EEPROM_OFFSET     0x0020
 #define METER_EEPROM_RECORD_SIZE 14
@@ -28,6 +29,10 @@ static uint8_t xdata tx_buffer[RX_BUFFER_SIZE];
 volatile uint16_t xdata energy_meter_registers[METER_REGISTER_COUNT];
 /* Last successfully received meter values; retained across poll timeouts/errors. */
 volatile uint16_t xdata s_energy_meter_registers[METER_REGISTER_COUNT];
+/* Modbus offsets 0..49 serve holding registers 40001..40050. */
+volatile uint16_t xdata slave_holding_registers[SLAVE_REGISTER_COUNT];
+volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
+static uint8_t relay_state_known[SLAVE_RELAY_COUNT];
 
 volatile uint8_t energy_meter_connected;
 volatile uint8_t energy_meter_data_valid;
@@ -296,6 +301,7 @@ static void MeterEeprom_Load(void)
             ((uint16_t)meter_eeprom_record[4 + index * 2] << 8) |
             meter_eeprom_record[5 + index * 2];
         energy_meter_registers[index] = s_energy_meter_registers[index];
+        slave_holding_registers[index] = s_energy_meter_registers[index];
         meter_eeprom_last_saved[index] = s_energy_meter_registers[index];
     }
     meter_eeprom_has_saved_record = 1;
@@ -475,6 +481,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
     uint8_t function;
     uint8_t quantity;
     uint8_t index;
+    uint8_t relay_index;
     uint16_t start_address;
     uint16_t value;
 
@@ -504,43 +511,120 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
     start_address = ((uint16_t)port1_rx_buffer[2] << 8) |
                     port1_rx_buffer[3];
 
-    if (function != 0x03)
+    if (function == 0x03)
     {
-        Modbus_SendException(function, 0x01);
-        return;
-    }
-    if (length != 8)
-    {
-        return;
-    }
-    if (port1_rx_buffer[4] != 0)
-    {
-        Modbus_SendException(function, 0x03);
-        return;
-    }
-    quantity = port1_rx_buffer[5];
-    if (quantity == 0 || quantity > SLAVE_REGISTER_COUNT ||
-        start_address >= SLAVE_REGISTER_COUNT ||
-        (uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
-    {
-        Modbus_SendException(function, 0x02);
+        if (length != 8)
+        {
+            return;
+        }
+        if (port1_rx_buffer[4] != 0)
+        {
+            Modbus_SendException(function, 0x03);
+            return;
+        }
+        quantity = port1_rx_buffer[5];
+        if (quantity == 0 || quantity > SLAVE_REGISTER_COUNT)
+        {
+            Modbus_SendException(function, 0x03);
+            return;
+        }
+
+        /* 40001..40050 use offsets 0..49; relays occupy offsets 4..6. */
+        if (start_address < SLAVE_REGISTER_COUNT)
+        {
+            if ((uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
+            {
+                Modbus_SendException(function, 0x02);
+                return;
+            }
+            for (index = 0; index < quantity; index++)
+            {
+                if ((start_address + index) >= SLAVE_RELAY_START &&
+                    (start_address + index) <
+                        (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+                {
+                    value = slave_relay_states[
+                        start_address + index - SLAVE_RELAY_START];
+                }
+                else
+                {
+                    value = slave_holding_registers[start_address + index];
+                }
+                tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
+                tx_buffer[4 + (index * 2)] = (uint8_t)value;
+            }
+        }
+        else
+        {
+            Modbus_SendException(function, 0x02);
+            return;
+        }
+
+        tx_buffer[0] = CONTROLLER_SLAVE_ID;
+        tx_buffer[1] = function;
+        tx_buffer[2] = quantity * 2;
+        RS485_SendFrame(1, tx_buffer, (uint8_t)(3 + quantity * 2));
+        if (port1_response_count != 0xFFFF)
+        {
+            port1_response_count++;
+        }
         return;
     }
 
-    tx_buffer[0] = CONTROLLER_SLAVE_ID;
-    tx_buffer[1] = function;
-    tx_buffer[2] = quantity * 2;
-    for (index = 0; index < quantity; index++)
+    if (function == 0x06)
     {
-        value = s_energy_meter_registers[start_address + index];
-        tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
-        tx_buffer[4 + (index * 2)] = (uint8_t)value;
+        if (length != 8)
+        {
+            return;
+        }
+        value = ((uint16_t)port1_rx_buffer[4] << 8) | port1_rx_buffer[5];
+        if (start_address >= SLAVE_RELAY_START &&
+            start_address < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+        {
+            if (value > 1)
+            {
+                Modbus_SendException(function, 0x03);
+                return;
+            }
+            relay_index = (uint8_t)(start_address - SLAVE_RELAY_START);
+            if (!relay_state_known[relay_index] ||
+                slave_relay_states[relay_index] != (uint8_t)value)
+            {
+                Board_PulseRelay((uint8_t)(relay_index + 1),
+                                 (uint8_t)value, 120);
+            }
+            slave_relay_states[relay_index] = (uint8_t)value;
+            slave_holding_registers[start_address] = value;
+            relay_state_known[relay_index] = 1;
+        }
+        else if (start_address >=
+                     (SLAVE_RELAY_START + SLAVE_RELAY_COUNT) &&
+                 start_address < SLAVE_REGISTER_COUNT)
+        {
+            /* 40008..40050 are auxiliary holding registers writable by ModScan. */
+            slave_holding_registers[start_address] = value;
+        }
+        else
+        {
+            Modbus_SendException(function, 0x02);
+            return;
+        }
+
+        tx_buffer[0] = CONTROLLER_SLAVE_ID;
+        tx_buffer[1] = function;
+        tx_buffer[2] = (uint8_t)(start_address >> 8);
+        tx_buffer[3] = (uint8_t)start_address;
+        tx_buffer[4] = (uint8_t)(value >> 8);
+        tx_buffer[5] = (uint8_t)value;
+        RS485_SendFrame(1, tx_buffer, 6);
+        if (port1_response_count != 0xFFFF)
+        {
+            port1_response_count++;
+        }
+        return;
     }
-    RS485_SendFrame(1, tx_buffer, (uint8_t)(3 + quantity * 2));
-    if (port1_response_count != 0xFFFF)
-    {
-        port1_response_count++;
-    }
+
+    Modbus_SendException(function, 0x01);
 }
 
 static void RS485_StartMeterRead(void)
@@ -616,8 +700,9 @@ static void RS485_HandleMeterResponse(uint8_t length)
         energy_meter_registers[index] =
             ((uint16_t)port2_rx_buffer[3 + (index * 2)] << 8) |
             port2_rx_buffer[4 + (index * 2)];
-			
+
         s_energy_meter_registers[index] = energy_meter_registers[index];
+        slave_holding_registers[index] = energy_meter_registers[index];
     }
     energy_meter_connected = 1;
     energy_meter_data_valid = 1;
@@ -663,6 +748,15 @@ void RS485_TestInit(void)
         energy_meter_registers[index] = 0;
         s_energy_meter_registers[index] = 0;
         meter_eeprom_last_saved[index] = 0;
+    }
+    for (index = 0; index < SLAVE_REGISTER_COUNT; index++)
+    {
+        slave_holding_registers[index] = 0;
+    }
+    for (index = 0; index < SLAVE_RELAY_COUNT; index++)
+    {
+        slave_relay_states[index] = 0;
+        relay_state_known[index] = 0;
     }
     energy_meter_connected = 0;
     energy_meter_data_valid = 0;

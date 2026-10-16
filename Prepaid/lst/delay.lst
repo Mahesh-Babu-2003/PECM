@@ -1,12 +1,12 @@
-C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 10:05:23 PAGE 1   
+C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 17:01:52 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE DELAY
 OBJECT MODULE PLACED IN .\Output\delay.obj
-COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC
-                    -0AE\Library\StdDriver\src\delay.c LARGE OMF2 OPTIMIZE(7,SPEED) BROWSE INCDIR(.\src;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_M
-                    -S51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS
-                    -51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\delay.lst) TABS(2) OBJECT(.\Output\delay.obj)
+COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.EXE vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_M
+                    -S51PC0AE\Library\StdDriver\src\delay.c LARGE OMF2 OPTIMIZE(7,SPEED) BROWSE INCDIR(.\src;vendor\MS51_BSP\MS51FC0AE_MS51XC
+                    -0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0
+                    -AE_MS51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\delay.lst) TABS(2) OBJECT(.\Output\delay.obj)
 
 line level    source
 
@@ -62,7 +62,7 @@ line level    source
   43   1            TL0  = 0; 
   44   1            TH0 = 0;
   45   1      }
-C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 10:05:23 PAGE 2   
+C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 17:01:52 PAGE 2   
 
   46          
   47          /**
@@ -126,7 +126,7 @@ line level    source
  102   1          switch (u16TMDIV)
  103   1          {
  104   2            case 1:T2MOD&=0x8F; break;
-C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 10:05:23 PAGE 3   
+C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 17:01:52 PAGE 3   
 
  105   2            case 4:T2MOD&=0x8F;T2MOD|=0x10; break;
  106   2            case 16:T2MOD&=0x8F;T2MOD|=0x20; break;
@@ -190,7 +190,7 @@ line level    source
  161   1          TH3TMP = HIBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u8TMDIV));
  162   1          while (u16CNT != 0)
  163   1          {
-C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 10:05:23 PAGE 4   
+C51 COMPILER V9.60.0.0   DELAY                                                             10/16/2026 17:01:52 PAGE 4   
 
  164   2            clr_T3CON_TF3;
  165   2            RL3 = TL3TMP;

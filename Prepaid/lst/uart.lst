@@ -1,12 +1,12 @@
-C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 10:05:23 PAGE 1   
+C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 17:01:52 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE UART
 OBJECT MODULE PLACED IN .\Output\uart.obj
-COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC
-                    -0AE\Library\StdDriver\src\uart.c LARGE OMF2 OPTIMIZE(7,SPEED) BROWSE INCDIR(.\src;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS
-                    -51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS5
-                    -1TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\uart.lst) TABS(2) OBJECT(.\Output\uart.obj)
+COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.EXE vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_M
+                    -S51PC0AE\Library\StdDriver\src\uart.c LARGE OMF2 OPTIMIZE(7,SPEED) BROWSE INCDIR(.\src;vendor\MS51_BSP\MS51FC0AE_MS51XC0
+                    -BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0A
+                    -E_MS51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\uart.lst) TABS(2) OBJECT(.\Output\uart.obj)
 
 line level    source
 
@@ -62,7 +62,7 @@ line level    source
               void SerialPort1_ISR(void) interrupt 15
               #elif defined __ICC8051__
               #pragma vector=0x7B
-C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 10:05:23 PAGE 2   
+C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 17:01:52 PAGE 2   
 
               __interrupt void SerialPort1_ISR(void)
               #elif defined __SDCC__
@@ -126,7 +126,7 @@ line level    source
  106   2                  break;
  107   2          }
  108   1       }
-C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 10:05:23 PAGE 3   
+C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 17:01:52 PAGE 3   
 
  109          
  110          uint8_t Receive_Data(uint8_t UARTPort)
@@ -190,7 +190,7 @@ MODULE INFORMATION:   STATIC OVERLAYABLE
    XDATA SIZE       =      2       9
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
-C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 10:05:23 PAGE 4   
+C51 COMPILER V9.60.0.0   UART                                                              10/16/2026 17:01:52 PAGE 4   
 
    IDATA SIZE       =   ----    ----
    BIT SIZE         =      3    ----
