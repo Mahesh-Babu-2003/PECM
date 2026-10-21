@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   COMMON                                                            10/16/2026 17:44:19 PAGE 1   
+C51 COMPILER V9.60.0.0   COMMON                                                            10/21/2026 16:11:22 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE COMMON
@@ -62,7 +62,7 @@ line level    source
               
               #elif defined __SDCC__
               uint8_t Read_APROM_BYTE(const uint16_t __code *u16_addr)
-C51 COMPILER V9.60.0.0   COMMON                                                            10/16/2026 17:44:19 PAGE 2   
+C51 COMPILER V9.60.0.0   COMMON                                                            10/21/2026 16:11:22 PAGE 2   
 
               
               #endif
@@ -126,7 +126,7 @@ line level    source
  106          /**
  107           * @brief       Software loop delay by HIRC, about 3ms
  108           * @param       None
-C51 COMPILER V9.60.0.0   COMMON                                                            10/16/2026 17:44:19 PAGE 3   
+C51 COMPILER V9.60.0.0   COMMON                                                            10/21/2026 16:11:22 PAGE 3   
 
  109           * @return      None
  110           * @details     None

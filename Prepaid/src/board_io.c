@@ -18,15 +18,22 @@ sbit SHIFT_LATCH_PIN = P2^3;
 sbit BOARD_SWITCH_1_PIN = P3^5;
 sbit BOARD_SWITCH_2_PIN = P3^2;
 sbit BOARD_SWITCH_3_PIN = P3^1;
+sbit BOARD_TAMPER_PIN = P2^4;
 sbit BOARD_BUZZER_PIN = P3^4;
 
 #define SWITCH_DEBOUNCE_SAMPLES 20
 #define SWITCH_1_LONG_PRESS_SAMPLES 5000
+#define SWITCH_2_3_LONG_PRESS_SAMPLES 5000
+#define TAMPER_DEBOUNCE_SAMPLES 20
 
 static uint8_t switch_debounce_counter[3];
 static uint8_t switch_stable_pressed;
 static uint16_t switch_1_hold_samples;
 static uint8_t switch_1_long_press_reported;
+static uint16_t switch_2_3_hold_samples;
+static uint8_t switch_2_3_long_press_reported;
+static uint8_t tamper_status;
+static uint8_t tamper_debounce_counter;
 
 void Board_Init(void)
 {
@@ -47,6 +54,7 @@ void Board_Init(void)
     SHIFT_DATA_PIN = 0;
     SHIFT_CLOCK_PIN = 0;
     SHIFT_LATCH_PIN = 0;
+    BOARD_TAMPER_PIN = 1;
     BOARD_BUZZER_PIN = 0;
 
     P01_PUSHPULL_MODE;
@@ -64,6 +72,7 @@ void Board_Init(void)
     P35_INPUT_MODE;
     P32_INPUT_MODE;
     P31_INPUT_MODE;
+    P24_QUASI_MODE;
     P34_PUSHPULL_MODE;
     P25_PUSHPULL_MODE;
     P33_PUSHPULL_MODE;
@@ -73,6 +82,10 @@ void Board_Init(void)
     P36_QUASI_MODE;
     P06_PUSHPULL_MODE;
     P07_INPUT_MODE;
+
+    SFRS = 0;
+    tamper_status = BOARD_TAMPER_PIN ? 1 : 0;
+    tamper_debounce_counter = 0;
 }
 
 void Board_DelayMs(uint16_t milliseconds)
@@ -222,7 +235,57 @@ uint8_t Board_ReadSwitchPresses(void)
         switch_1_hold_samples = 0;
         switch_1_long_press_reported = 0;
     }
+
+    if ((switch_stable_pressed & (BOARD_SWITCH_2 | BOARD_SWITCH_3)) ==
+        (BOARD_SWITCH_2 | BOARD_SWITCH_3))
+    {
+        if (switch_2_3_hold_samples < SWITCH_2_3_LONG_PRESS_SAMPLES)
+        {
+            switch_2_3_hold_samples++;
+        }
+        if (switch_2_3_hold_samples >= SWITCH_2_3_LONG_PRESS_SAMPLES &&
+            !switch_2_3_long_press_reported)
+        {
+            events |= BOARD_SWITCH_2_3_LONG;
+            switch_2_3_long_press_reported = 1;
+        }
+    }
+    else
+    {
+        switch_2_3_hold_samples = 0;
+        switch_2_3_long_press_reported = 0;
+    }
     return events;
+}
+
+uint8_t Board_GetStableSwitches(void)
+{
+    return switch_stable_pressed;
+}
+
+uint8_t Board_GetTamperStatus(void)
+{
+    uint8_t raw_status;
+
+    SFRS = 0;
+    raw_status = BOARD_TAMPER_PIN ? 1 : 0;
+    if (raw_status != tamper_status)
+    {
+        if (tamper_debounce_counter < TAMPER_DEBOUNCE_SAMPLES)
+        {
+            tamper_debounce_counter++;
+        }
+        if (tamper_debounce_counter >= TAMPER_DEBOUNCE_SAMPLES)
+        {
+            tamper_status = raw_status;
+            tamper_debounce_counter = 0;
+        }
+    }
+    else
+    {
+        tamper_debounce_counter = 0;
+    }
+    return tamper_status;
 }
 
 void Board_Beep(uint16_t milliseconds)

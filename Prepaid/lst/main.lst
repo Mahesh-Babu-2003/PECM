@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 1   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
@@ -20,631 +20,1022 @@ line level    source
    8          #define RTC_EDIT_TIMEOUT_TICKS 30000
    9          #define RTC_EDIT_DIGIT_COUNT   14
   10          #define RTC_SAVE_MESSAGE_TICKS 2000
-  11          
-  12          static uint16_t rtc_poll_timer;
-  13          static uint16_t screen_switch_timer;
-  14          static uint16_t rtc_edit_idle_timer;
-  15          static uint8_t lcd_values_initialized;
-  16          static uint8_t lcd_page;
-  17          static uint8_t rtc_edit_active;
-  18          static uint8_t rtc_selected_digit;
-  19          static uint8_t backlight_applied;
-  20          static uint8_t rtc_save_message;
-  21          static uint16_t rtc_save_message_ticks;
-  22          static uint16_t lcd_last_float_registers[4];
-  23          
-  24          static void LCD_WriteFloatField(unsigned long bits, uint8_t field_width)
-  25          {
-  26   1          union
-  27   1          {
-  28   1              unsigned long bits;
-  29   1              float value;
-  30   1          } decoded_float;
-  31   1          uint8_t digits[7];
-  32   1          uint8_t digit_count;
-  33   1          uint8_t output_length;
-  34   1          uint8_t index;
-  35   1          uint8_t negative;
-  36   1          uint8_t fraction;
-  37   1          unsigned long integer_part;
-  38   1          unsigned long scaled_value;
-  39   1          float magnitude;
-  40   1      
-  41   1          decoded_float.bits = bits;
-  42   1          if ((bits & 0x7F800000UL) == 0x7F800000UL)
-  43   1          {
-  44   2              if ((bits & 0x007FFFFFUL) != 0)
-  45   2              {
-  46   3                  output_length = 3;
-  47   3                  LCD_WriteText("NAN");
-  48   3              }
-  49   2              else if (bits & 0x80000000UL)
-  50   2              {
-  51   3                  output_length = 4;
-  52   3                  LCD_WriteText("-INF");
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 2   
+  11          #define RTC_KEY_COMBO_DELAY_TICKS 100
+  12          #define RS485_INFO_PAGE_TICKS 3000
+  13          #define LCD_PAGE_COMPANY 0
+  14          #define LCD_PAGE_BALANCE 1
+  15          #define LCD_PAGE_LOADS   2
+  16          #define LCD_PAGE_RATES   3
+  17          #define LCD_PAGE_METER   4
+  18          #define LCD_PAGE_RTC     5
+  19          #define LCD_PAGE_COUNT   6
+  20          
+  21          static uint16_t rtc_poll_timer;
+  22          static uint16_t screen_switch_timer;
+  23          static uint16_t rtc_edit_idle_timer;
+  24          static uint8_t lcd_values_initialized;
+  25          static uint8_t lcd_page;
+  26          static uint8_t rtc_edit_active;
+  27          static uint8_t rtc_selected_digit;
+  28          static uint8_t backlight_applied;
+  29          static uint16_t backlight_idle_seconds;
+  30          static uint16_t backlight_idle_ms;
+  31          static uint8_t rtc_save_message;
+  32          static uint16_t rtc_save_message_ticks;
+  33          static uint16_t lcd_last_float_registers[4];
+  34          static uint8_t pending_rtc_switch_events;
+  35          static uint16_t pending_rtc_switch_ticks;
+  36          static uint8_t rs485_info_active;
+  37          static uint8_t rs485_info_port;
+  38          static uint16_t rs485_info_page_ticks;
+  39          
+  40          static uint8_t LCD_WriteUnsignedLong(uint32_t value)
+  41          {
+  42   1          uint8_t digits[10];
+  43   1          uint8_t digit_count;
+  44   1          uint8_t index;
+  45   1      
+  46   1          digit_count = 0;
+  47   1          do
+  48   1          {
+  49   2              digits[digit_count++] = (uint8_t)('0' + (value % 10UL));
+  50   2              value /= 10UL;
+  51   2          } while (value != 0 && digit_count < sizeof(digits));
+  52   1      
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 2   
 
-  53   3              }
-  54   2              else
-  55   2              {
-  56   3                  output_length = 3;
-  57   3                  LCD_WriteText("INF");
-  58   3              }
-  59   2              while (output_length++ < field_width) LCD_WriteChar(' ');
-  60   2              return;
-  61   2          }
-  62   1      
-  63   1          negative = (bits & 0x80000000UL) ? 1 : 0;
-  64   1          magnitude = negative ? -decoded_float.value : decoded_float.value;
-  65   1          if (magnitude > 999999.99f)
-  66   1          {
-  67   2              if (negative)
-  68   2              {
-  69   3                  output_length = 9;
-  70   3                  LCD_WriteText("-OVERFLOW");
-  71   3              }
-  72   2              else
-  73   2              {
-  74   3                  output_length = 8;
-  75   3                  LCD_WriteText("OVERFLOW");
-  76   3              }
-  77   2              while (output_length++ < field_width) LCD_WriteChar(' ');
-  78   2              return;
-  79   2          }
-  80   1      
-  81   1          scaled_value = (unsigned long)(magnitude * 100.0f + 0.5f);
-  82   1          integer_part = scaled_value / 100UL;
-  83   1          fraction = (uint8_t)(scaled_value % 100UL);
-  84   1          digit_count = 0;
-  85   1          do
+  53   1          for (index = 0; index < digit_count; index++)
+  54   1          {
+  55   2              LCD_WriteChar((char)digits[digit_count - index - 1]);
+  56   2          }
+  57   1          return digit_count;
+  58   1      }
+  59          
+  60          static uint8_t LCD_WriteSignedInteger(int16_t value)
+  61          {
+  62   1          uint8_t output_length;
+  63   1      
+  64   1          if (value < 0)
+  65   1          {
+  66   2              LCD_WriteChar('-');
+  67   2              output_length = (uint8_t)(1 + LCD_WriteUnsignedLong(
+  68   2                  (uint32_t)(-(int32_t)value)));
+  69   2              return output_length;
+  70   2          }
+  71   1          return LCD_WriteUnsignedLong((uint32_t)value);
+  72   1      }
+  73          
+  74          static void LCD_ShowRs485Settings(uint8_t port)
+  75          {
+  76   1          uint32_t baud_rate;
+  77   1          uint8_t parity;
+  78   1          uint8_t slave_id;
+  79   1          uint8_t line_length;
+  80   1          uint8_t index;
+  81   1      
+  82   1          RS485_GetCommunicationSettings(port, &baud_rate, &parity, &slave_id);
+  83   1          LCD_Command(0x0C);
+  84   1          LCD_SetCursor(0, 0);
+  85   1          if (port == 1)
   86   1          {
-  87   2              digits[digit_count++] = (uint8_t)('0' + (integer_part % 10UL));
-  88   2              integer_part /= 10UL;
-  89   2          } while (integer_part != 0 && digit_count < sizeof(digits));
-  90   1      
-  91   1          output_length = (uint8_t)(digit_count + 3 + negative);
-  92   1          for (index = output_length; index < field_width; index++)
-  93   1          {
-  94   2              LCD_WriteChar(' ');
-  95   2          }
-  96   1          if (negative) LCD_WriteChar('-');
-  97   1          while (digit_count != 0)
-  98   1          {
-  99   2              LCD_WriteChar((char)digits[--digit_count]);
- 100   2          }
- 101   1          LCD_WriteChar('.');
- 102   1          LCD_WriteChar((char)('0' + (fraction / 10)));
- 103   1          LCD_WriteChar((char)('0' + (fraction % 10)));
- 104   1      }
- 105          
- 106          static void LCD_ShowSlaveRegisters(void)
- 107          {
- 108   1          uint16_t registers[4];
- 109   1          unsigned long float_bits_1;
- 110   1          unsigned long float_bits_2;
- 111   1          uint8_t index;
- 112   1      
- 113   1          for (index = 0; index < 4; index++)
- 114   1          {
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 3   
+  87   2              LCD_WriteText("P1 ");
+  88   2          }
+  89   1          else
+  90   1          {
+  91   2              LCD_WriteText("P2 ");
+  92   2          }
+  93   1          line_length = (uint8_t)(3 + LCD_WriteUnsignedLong(baud_rate));
+  94   1          LCD_WriteChar(' ');
+  95   1          line_length++;
+  96   1          if (parity == 0)
+  97   1          {
+  98   2              LCD_WriteText("8N1");
+  99   2          }
+ 100   1          else if (parity == 1)
+ 101   1          {
+ 102   2              LCD_WriteText("8E1");
+ 103   2          }
+ 104   1          else
+ 105   1          {
+ 106   2              LCD_WriteText("8O1");
+ 107   2          }
+ 108   1          line_length += 3;
+ 109   1          for (index = line_length; index < 16; index++) LCD_WriteChar(' ');
+ 110   1      
+ 111   1          LCD_SetCursor(1, 0);
+ 112   1          LCD_WriteText("SLAVE ID: ");
+ 113   1          line_length = (uint8_t)(10 + LCD_WriteUnsignedLong(slave_id));
+ 114   1          for (index = line_length; index < 16; index++) LCD_WriteChar(' ');
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 3   
 
- 115   2              registers[index] = slave_holding_registers[index];
- 116   2          }
- 117   1          if (lcd_values_initialized)
- 118   1          {
- 119   2              for (index = 0; index < 4; index++)
- 120   2              {
- 121   3                  if (registers[index] != lcd_last_float_registers[index]) break;
- 122   3              }
- 123   2              if (index == 4) return;
- 124   2          }
- 125   1      
- 126   1          /* Word-swapped Modbus pairs: the second register supplies the high word. */
- 127   1          float_bits_1 = ((unsigned long)registers[1] << 16) | registers[0];
- 128   1          float_bits_2 = ((unsigned long)registers[3] << 16) | registers[2];
- 129   1      
- 130   1          LCD_Command(0x0C);
- 131   1          LCD_SetCursor(0, 0);
- 132   1          LCD_WriteText("F1:");
- 133   1          LCD_WriteFloatField(float_bits_1, 13);
- 134   1      
- 135   1          LCD_SetCursor(1, 0);
- 136   1          LCD_WriteText("F2:");
- 137   1          LCD_WriteFloatField(float_bits_2, 13);
- 138   1      
- 139   1          for (index = 0; index < 4; index++)
- 140   1          {
- 141   2              lcd_last_float_registers[index] = registers[index];
- 142   2          }
- 143   1          lcd_values_initialized = 1;
- 144   1      }
- 145          
- 146          static void LCD_WriteTwoDigits(uint8_t value)
- 147          {
- 148   1          LCD_WriteChar((char)('0' + (value / 10)));
- 149   1          LCD_WriteChar((char)('0' + (value % 10)));
- 150   1      }
- 151          
- 152          static void LCD_WriteFourDigits(uint16_t value)
- 153          {
- 154   1          LCD_WriteChar((char)('0' + ((value / 1000) % 10)));
- 155   1          LCD_WriteChar((char)('0' + ((value / 100) % 10)));
- 156   1          LCD_WriteChar((char)('0' + ((value / 10) % 10)));
- 157   1          LCD_WriteChar((char)('0' + (value % 10)));
- 158   1      }
- 159          
- 160          static void LCD_ShowRtc(void)
- 161          {
- 162   1          uint8_t cursor_row;
- 163   1          uint8_t cursor_column;
- 164   1      
- 165   1          LCD_SetCursor(0, 0);
- 166   1          if (rtc_save_message != 0)
- 167   1          {
- 168   2              if (rtc_save_message == 1)
- 169   2              {
- 170   3                  LCD_WriteText("RTC SAVE SUCCESS");
- 171   3                  LCD_SetCursor(1, 0);
- 172   3                  LCD_WriteText("EEPROM BACKUP   ");
- 173   3              }
- 174   2              else
- 175   2              {
- 176   3                  LCD_WriteText("RTC SAVE FAILED ");
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 4   
+ 115   1      }
+ 116          
+ 117          static void LCD_WriteFloatField(unsigned long bits, uint8_t field_width)
+ 118          {
+ 119   1          union
+ 120   1          {
+ 121   1              unsigned long bits;
+ 122   1              float value;
+ 123   1          } decoded_float;
+ 124   1          uint8_t digits[7];
+ 125   1          uint8_t digit_count;
+ 126   1          uint8_t output_length;
+ 127   1          uint8_t index;
+ 128   1          uint8_t negative;
+ 129   1          uint8_t fraction;
+ 130   1          unsigned long integer_part;
+ 131   1          unsigned long scaled_value;
+ 132   1          float magnitude;
+ 133   1      
+ 134   1          decoded_float.bits = bits;
+ 135   1          if ((bits & 0x7F800000UL) == 0x7F800000UL)
+ 136   1          {
+ 137   2              if ((bits & 0x007FFFFFUL) != 0)
+ 138   2              {
+ 139   3                  output_length = 3;
+ 140   3                  LCD_WriteText("NAN");
+ 141   3              }
+ 142   2              else if (bits & 0x80000000UL)
+ 143   2              {
+ 144   3                  output_length = 4;
+ 145   3                  LCD_WriteText("-INF");
+ 146   3              }
+ 147   2              else
+ 148   2              {
+ 149   3                  output_length = 3;
+ 150   3                  LCD_WriteText("INF");
+ 151   3              }
+ 152   2              while (output_length++ < field_width) LCD_WriteChar(' ');
+ 153   2              return;
+ 154   2          }
+ 155   1      
+ 156   1          negative = (bits & 0x80000000UL) ? 1 : 0;
+ 157   1          magnitude = negative ? -decoded_float.value : decoded_float.value;
+ 158   1          if (magnitude > 999999.99f)
+ 159   1          {
+ 160   2              if (negative)
+ 161   2              {
+ 162   3                  output_length = 9;
+ 163   3                  LCD_WriteText("-OVERFLOW");
+ 164   3              }
+ 165   2              else
+ 166   2              {
+ 167   3                  output_length = 8;
+ 168   3                  LCD_WriteText("OVERFLOW");
+ 169   3              }
+ 170   2              while (output_length++ < field_width) LCD_WriteChar(' ');
+ 171   2              return;
+ 172   2          }
+ 173   1      
+ 174   1          scaled_value = (unsigned long)(magnitude * 100.0f + 0.5f);
+ 175   1          integer_part = scaled_value / 100UL;
+ 176   1          fraction = (uint8_t)(scaled_value % 100UL);
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 4   
 
- 177   3                  LCD_SetCursor(1, 0);
- 178   3                  LCD_WriteText("CHECK EEPROM    ");
- 179   3              }
- 180   2              LCD_Command(0x0C);
- 181   2              return;
- 182   2          }
+ 177   1          digit_count = 0;
+ 178   1          do
+ 179   1          {
+ 180   2              digits[digit_count++] = (uint8_t)('0' + (integer_part % 10UL));
+ 181   2              integer_part /= 10UL;
+ 182   2          } while (integer_part != 0 && digit_count < sizeof(digits));
  183   1      
- 184   1          if (!rtc_datetime_valid && !rtc_edit_active)
- 185   1          {
- 186   2              LCD_WriteText("RTC DATA INVALID");
- 187   2              LCD_SetCursor(1, 0);
- 188   2              LCD_WriteText("CHECK RTC SETUP ");
- 189   2              LCD_Command(0x0C);
- 190   2              return;
- 191   2          }
- 192   1      
- 193   1          LCD_WriteText("DATE: ");
- 194   1          LCD_WriteTwoDigits(rtc_datetime.day);
- 195   1          LCD_WriteChar(':');
- 196   1          LCD_WriteTwoDigits(rtc_datetime.month);
- 197   1          LCD_WriteChar(':');
- 198   1          LCD_WriteFourDigits(rtc_datetime.year);
- 199   1      
- 200   1          LCD_SetCursor(1, 0);
- 201   1          LCD_WriteText("TIME: ");
- 202   1          LCD_WriteTwoDigits(rtc_datetime.hours);
- 203   1          LCD_WriteChar(':');
- 204   1          LCD_WriteTwoDigits(rtc_datetime.minutes);
- 205   1          LCD_WriteChar(':');
- 206   1          LCD_WriteTwoDigits(rtc_datetime.seconds);
- 207   1          LCD_WriteText("  ");
- 208   1      
- 209   1          if (rtc_edit_active)
- 210   1          {
- 211   2              if (rtc_selected_digit < 8)
- 212   2              {
- 213   3                  cursor_row = 0;
- 214   3                  if (rtc_selected_digit < 2)
- 215   3                  {
- 216   4                      cursor_column = (uint8_t)(6 + rtc_selected_digit);
- 217   4                  }
- 218   3                  else if (rtc_selected_digit < 4)
- 219   3                  {
- 220   4                      cursor_column = (uint8_t)(7 + rtc_selected_digit);
- 221   4                  }
- 222   3                  else
- 223   3                  {
- 224   4                      cursor_column = (uint8_t)(8 + rtc_selected_digit);
- 225   4                  }
- 226   3              }
- 227   2              else
- 228   2              {
- 229   3                  uint8_t time_digit;
- 230   3      
- 231   3                  cursor_row = 1;
- 232   3                  time_digit = (uint8_t)(rtc_selected_digit - 8);
- 233   3                  if (time_digit < 2)
- 234   3                  {
- 235   4                      cursor_column = (uint8_t)(6 + time_digit);
- 236   4                  }
- 237   3                  else if (time_digit < 4)
- 238   3                  {
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 5   
+ 184   1          output_length = (uint8_t)(digit_count + 3 + negative);
+ 185   1          for (index = output_length; index < field_width; index++)
+ 186   1          {
+ 187   2              LCD_WriteChar(' ');
+ 188   2          }
+ 189   1          if (negative) LCD_WriteChar('-');
+ 190   1          while (digit_count != 0)
+ 191   1          {
+ 192   2              LCD_WriteChar((char)digits[--digit_count]);
+ 193   2          }
+ 194   1          LCD_WriteChar('.');
+ 195   1          LCD_WriteChar((char)('0' + (fraction / 10)));
+ 196   1          LCD_WriteChar((char)('0' + (fraction % 10)));
+ 197   1      }
+ 198          
+ 199          static void LCD_ShowSlaveRegisters(void)
+ 200          {
+ 201   1          uint16_t registers[4];
+ 202   1          unsigned long float_bits_1;
+ 203   1          unsigned long float_bits_2;
+ 204   1          uint8_t index;
+ 205   1      
+ 206   1          for (index = 0; index < 4; index++)
+ 207   1          {
+ 208   2              registers[index] = slave_holding_registers[index];
+ 209   2          }
+ 210   1          if (lcd_values_initialized)
+ 211   1          {
+ 212   2              for (index = 0; index < 4; index++)
+ 213   2              {
+ 214   3                  if (registers[index] != lcd_last_float_registers[index]) break;
+ 215   3              }
+ 216   2              if (index == 4) return;
+ 217   2          }
+ 218   1      
+ 219   1          /* Word-swapped Modbus pairs: the second register supplies the high word. */
+ 220   1          float_bits_1 = ((unsigned long)registers[1] << 16) | registers[0];
+ 221   1          float_bits_2 = ((unsigned long)registers[3] << 16) | registers[2];
+ 222   1      
+ 223   1          LCD_Command(0x0C);
+ 224   1          LCD_SetCursor(0, 0);
+ 225   1          LCD_WriteText("F1:");
+ 226   1          LCD_WriteFloatField(float_bits_1, 13);
+ 227   1      
+ 228   1          LCD_SetCursor(1, 0);
+ 229   1          LCD_WriteText("F2:");
+ 230   1          LCD_WriteFloatField(float_bits_2, 13);
+ 231   1      
+ 232   1          for (index = 0; index < 4; index++)
+ 233   1          {
+ 234   2              lcd_last_float_registers[index] = registers[index];
+ 235   2          }
+ 236   1          lcd_values_initialized = 1;
+ 237   1      }
+ 238          
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 5   
 
- 239   4                      cursor_column = (uint8_t)(7 + time_digit);
- 240   4                  }
- 241   3                  else
- 242   3                  {
- 243   4                      cursor_column = (uint8_t)(8 + time_digit);
- 244   4                  }
- 245   3              }
- 246   2              LCD_Command(0x0F);
- 247   2              LCD_SetCursor(cursor_row, cursor_column);
- 248   2          }
- 249   1          else
- 250   1          {
- 251   2              LCD_Command(0x0C);
- 252   2          }
- 253   1      }
- 254          
- 255          static uint8_t RTC_IsLeapYear(uint16_t year)
- 256          {
- 257   1          return (uint8_t)(((year % 4) == 0) &&
- 258   1              (((year % 100) != 0) || ((year % 400) == 0)));
- 259   1      }
- 260          
- 261          static uint8_t RTC_DaysInMonth(uint16_t year, uint8_t month)
- 262          {
- 263   1          switch (month)
- 264   1          {
- 265   2              case 2:
- 266   2                  return RTC_IsLeapYear(year) ? 29 : 28;
- 267   2              case 4:
- 268   2              case 6:
- 269   2              case 9:
- 270   2              case 11:
- 271   2                  return 30;
- 272   2              default:
- 273   2                  return 31;
- 274   2          }
- 275   1      }
- 276          
- 277          static uint8_t RTC_DateTimeIsValid(const RTC_DateTime *datetime)
- 278          {
- 279   1          return (uint8_t)(datetime->year >= 2000 && datetime->year <= 2199 &&
- 280   1              datetime->month >= 1 && datetime->month <= 12 && datetime->day >= 1 &&
- 281   1              datetime->day <= RTC_DaysInMonth(datetime->year, datetime->month) &&
- 282   1              datetime->hours <= 23 && datetime->minutes <= 59 &&
- 283   1              datetime->seconds <= 59);
- 284   1      }
- 285          
- 286          static uint8_t RTC_CalculateWeekday(uint16_t year, uint8_t month, uint8_t day)
- 287          {
- 288   1          uint16_t century_year;
- 289   1          uint16_t century;
- 290   1          uint16_t weekday;
- 291   1      
- 292   1          if (month < 3)
- 293   1          {
- 294   2              month += 12;
- 295   2              year--;
- 296   2          }
- 297   1          century_year = (uint16_t)(year % 100);
- 298   1          century = (uint16_t)(year / 100);
- 299   1          weekday = (uint16_t)((day + (13 * (month + 1)) / 5 + century_year +
- 300   1              (century_year / 4) + (century / 4) + (5 * century)) % 7);
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 6   
+ 239          static void LCD_WriteTwoDigits(uint8_t value)
+ 240          {
+ 241   1          LCD_WriteChar((char)('0' + (value / 10)));
+ 242   1          LCD_WriteChar((char)('0' + (value % 10)));
+ 243   1      }
+ 244          
+ 245          static void LCD_WriteFourDigits(uint16_t value)
+ 246          {
+ 247   1          LCD_WriteChar((char)('0' + ((value / 1000) % 10)));
+ 248   1          LCD_WriteChar((char)('0' + ((value / 100) % 10)));
+ 249   1          LCD_WriteChar((char)('0' + ((value / 10) % 10)));
+ 250   1          LCD_WriteChar((char)('0' + (value % 10)));
+ 251   1      }
+ 252          
+ 253          static void LCD_ShowRtc(void)
+ 254          {
+ 255   1          uint8_t cursor_row;
+ 256   1          uint8_t cursor_column;
+ 257   1      
+ 258   1          LCD_SetCursor(0, 0);
+ 259   1          if (rtc_save_message != 0)
+ 260   1          {
+ 261   2              if (rtc_save_message == 1)
+ 262   2              {
+ 263   3                  LCD_WriteText("RTC SAVE SUCCESS");
+ 264   3                  LCD_SetCursor(1, 0);
+ 265   3                  LCD_WriteText("EEPROM BACKUP   ");
+ 266   3              }
+ 267   2              else
+ 268   2              {
+ 269   3                  LCD_WriteText("RTC SAVE FAILED ");
+ 270   3                  LCD_SetCursor(1, 0);
+ 271   3                  LCD_WriteText("CHECK EEPROM    ");
+ 272   3              }
+ 273   2              LCD_Command(0x0C);
+ 274   2              return;
+ 275   2          }
+ 276   1      
+ 277   1          if (!rtc_datetime_valid && !rtc_edit_active)
+ 278   1          {
+ 279   2              LCD_WriteText("RTC DATA INVALID");
+ 280   2              LCD_SetCursor(1, 0);
+ 281   2              LCD_WriteText("CHECK RTC SETUP ");
+ 282   2              LCD_Command(0x0C);
+ 283   2              return;
+ 284   2          }
+ 285   1      
+ 286   1          LCD_WriteText("DATE: ");
+ 287   1          LCD_WriteTwoDigits(rtc_datetime.day);
+ 288   1          LCD_WriteChar(':');
+ 289   1          LCD_WriteTwoDigits(rtc_datetime.month);
+ 290   1          LCD_WriteChar(':');
+ 291   1          LCD_WriteFourDigits(rtc_datetime.year);
+ 292   1      
+ 293   1          LCD_SetCursor(1, 0);
+ 294   1          LCD_WriteText("TIME: ");
+ 295   1          LCD_WriteTwoDigits(rtc_datetime.hours);
+ 296   1          LCD_WriteChar(':');
+ 297   1          LCD_WriteTwoDigits(rtc_datetime.minutes);
+ 298   1          LCD_WriteChar(':');
+ 299   1          LCD_WriteTwoDigits(rtc_datetime.seconds);
+ 300   1          LCD_WriteText("  ");
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 6   
 
- 301   1          return (uint8_t)((weekday + 6) % 7);
- 302   1      }
- 303          
- 304          static uint16_t RTC_AdjustDigit(uint16_t value, uint16_t place,
- 305                                          int8_t direction)
- 306          {
- 307   1          uint8_t digit;
- 308   1          uint8_t changed_digit;
- 309   1      
- 310   1          digit = (uint8_t)((value / place) % 10);
- 311   1          if (direction < 0)
- 312   1          {
- 313   2              changed_digit = (digit == 0) ? 9 : (uint8_t)(digit - 1);
- 314   2          }
- 315   1          else
- 316   1          {
- 317   2              changed_digit = (digit == 9) ? 0 : (uint8_t)(digit + 1);
- 318   2          }
- 319   1          return (uint16_t)(value - ((uint16_t)digit * place) +
- 320   1                            ((uint16_t)changed_digit * place));
- 321   1      }
- 322          
- 323          static uint8_t RTC_AdjustSelectedDigit(int8_t direction)
- 324          {
- 325   1          RTC_DateTime candidate;
- 326   1          uint8_t digit;
- 327   1      
- 328   1          candidate.year = rtc_datetime.year;
- 329   1          candidate.month = rtc_datetime.month;
- 330   1          candidate.day = rtc_datetime.day;
- 331   1          candidate.weekday = rtc_datetime.weekday;
- 332   1          candidate.hours = rtc_datetime.hours;
- 333   1          candidate.minutes = rtc_datetime.minutes;
- 334   1          candidate.seconds = rtc_datetime.seconds;
- 335   1      
- 336   1          digit = rtc_selected_digit;
- 337   1          if (digit < 2)
- 338   1          {
- 339   2              candidate.day = (uint8_t)RTC_AdjustDigit(candidate.day,
- 340   2                  (digit == 0) ? 10 : 1, direction);
+ 301   1      
+ 302   1          if (rtc_edit_active)
+ 303   1          {
+ 304   2              if (rtc_selected_digit < 8)
+ 305   2              {
+ 306   3                  cursor_row = 0;
+ 307   3                  if (rtc_selected_digit < 2)
+ 308   3                  {
+ 309   4                      cursor_column = (uint8_t)(6 + rtc_selected_digit);
+ 310   4                  }
+ 311   3                  else if (rtc_selected_digit < 4)
+ 312   3                  {
+ 313   4                      cursor_column = (uint8_t)(7 + rtc_selected_digit);
+ 314   4                  }
+ 315   3                  else
+ 316   3                  {
+ 317   4                      cursor_column = (uint8_t)(8 + rtc_selected_digit);
+ 318   4                  }
+ 319   3              }
+ 320   2              else
+ 321   2              {
+ 322   3                  uint8_t time_digit;
+ 323   3      
+ 324   3                  cursor_row = 1;
+ 325   3                  time_digit = (uint8_t)(rtc_selected_digit - 8);
+ 326   3                  if (time_digit < 2)
+ 327   3                  {
+ 328   4                      cursor_column = (uint8_t)(6 + time_digit);
+ 329   4                  }
+ 330   3                  else if (time_digit < 4)
+ 331   3                  {
+ 332   4                      cursor_column = (uint8_t)(7 + time_digit);
+ 333   4                  }
+ 334   3                  else
+ 335   3                  {
+ 336   4                      cursor_column = (uint8_t)(8 + time_digit);
+ 337   4                  }
+ 338   3              }
+ 339   2              LCD_Command(0x0F);
+ 340   2              LCD_SetCursor(cursor_row, cursor_column);
  341   2          }
- 342   1          else if (digit < 4)
+ 342   1          else
  343   1          {
- 344   2              candidate.month = (uint8_t)RTC_AdjustDigit(candidate.month,
- 345   2                  (digit == 2) ? 10 : 1, direction);
- 346   2          }
- 347   1          else if (digit < 8)
- 348   1          {
- 349   2              candidate.year = RTC_AdjustDigit(candidate.year,
- 350   2                  (digit == 4) ? 1000 : ((digit == 5) ? 100 :
- 351   2                  ((digit == 6) ? 10 : 1)), direction);
- 352   2          }
- 353   1          else if (digit < 10)
- 354   1          {
- 355   2              candidate.hours = (uint8_t)RTC_AdjustDigit(candidate.hours,
- 356   2                  (digit == 8) ? 10 : 1, direction);
- 357   2          }
- 358   1          else if (digit < 12)
- 359   1          {
- 360   2              candidate.minutes = (uint8_t)RTC_AdjustDigit(candidate.minutes,
- 361   2                  (digit == 10) ? 10 : 1, direction);
- 362   2          }
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 7   
+ 344   2              LCD_Command(0x0C);
+ 345   2          }
+ 346   1      }
+ 347          
+ 348          static void LCD_PadLine(uint8_t row, uint8_t used_columns)
+ 349          {
+ 350   1          if (used_columns >= 16)
+ 351   1          {
+ 352   2              return;
+ 353   2          }
+ 354   1          LCD_SetCursor(row, used_columns);
+ 355   1          while (used_columns < 16)
+ 356   1          {
+ 357   2              LCD_WriteChar(' ');
+ 358   2              used_columns++;
+ 359   2          }
+ 360   1      }
+ 361          
+ 362          static void LCD_ShowCompanyName(void)
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 7   
 
- 363   1          else
- 364   1          {
- 365   2              candidate.seconds = (uint8_t)RTC_AdjustDigit(candidate.seconds,
- 366   2                  (digit == 12) ? 10 : 1, direction);
- 367   2          }
- 368   1      
- 369   1          if (!RTC_DateTimeIsValid(&candidate))
+ 363          {
+ 364   1          uint8_t index;
+ 365   1          uint8_t character;
+ 366   1          uint16_t word;
+ 367   1      
+ 368   1          LCD_Command(0x0C);
+ 369   1          for (index = 0; index < 32; index++)
  370   1          {
- 371   2              return 0;
- 372   2          }
- 373   1          candidate.weekday = RTC_CalculateWeekday(candidate.year,
- 374   1              candidate.month, candidate.day);
- 375   1          if (!RTC_WriteDateTime(&candidate))
- 376   1          {
- 377   2              return 0;
- 378   2          }
- 379   1      
- 380   1          rtc_datetime.year = candidate.year;
- 381   1          rtc_datetime.month = candidate.month;
- 382   1          rtc_datetime.day = candidate.day;
- 383   1          rtc_datetime.weekday = candidate.weekday;
- 384   1          rtc_datetime.hours = candidate.hours;
- 385   1          rtc_datetime.minutes = candidate.minutes;
- 386   1          rtc_datetime.seconds = candidate.seconds;
- 387   1          rtc_datetime_valid = 1;
- 388   1          return 1;
- 389   1      }
- 390          
- 391          static uint8_t RTC_HandleSwitchPresses(uint8_t switch_events)
- 392          {
- 393   1          if (switch_events == 0)
- 394   1          {
- 395   2              return 0;
- 396   2          }
- 397   1      
- 398   1          lcd_page = 1;
- 399   1          screen_switch_timer = 0;
- 400   1          rtc_edit_idle_timer = 0;
- 401   1      
- 402   1          if (switch_events & BOARD_SWITCH_1)
- 403   1          {
- 404   2              if (rtc_edit_active)
- 405   2              {
- 406   3                  rtc_selected_digit++;
- 407   3                  if (rtc_selected_digit >= RTC_EDIT_DIGIT_COUNT)
- 408   3                  {
- 409   4                      rtc_selected_digit = 0;
- 410   4                  }
- 411   3              }
- 412   2              else
- 413   2              {
- 414   3                  rtc_selected_digit = 0;
- 415   3              }
- 416   2              rtc_edit_active = 1;
- 417   2          }
- 418   1          else if (switch_events & BOARD_SWITCH_2)
- 419   1          {
- 420   2              rtc_edit_active = 1;
- 421   2              RTC_AdjustSelectedDigit(-1);
- 422   2          }
- 423   1          else if (switch_events & BOARD_SWITCH_3)
- 424   1          {
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 8   
+ 371   2              if (index >= (COMPANY_NAME_REGISTER_COUNT * 2))
+ 372   2              {
+ 373   3                  character = ' ';
+ 374   3              }
+ 375   2              else if ((index & 1) == 0)
+ 376   2              {
+ 377   3                  word = slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index / 2];
+ 378   3                  character = (uint8_t)(word >> 8);
+ 379   3              }
+ 380   2              else
+ 381   2              {
+ 382   3                  character = (uint8_t)word;
+ 383   3              }
+ 384   2              LCD_SetCursor((uint8_t)(index / 16), (uint8_t)(index % 16));
+ 385   2              LCD_WriteChar((character >= 32 && character <= 126) ?
+ 386   2                  (char)character : ' ');
+ 387   2          }
+ 388   1      }
+ 389          
+ 390          static void LCD_ShowBalance(void)
+ 391          {
+ 392   1          int16_t balance;
+ 393   1          uint8_t used_columns;
+ 394   1          uint8_t alert;
+ 395   1      
+ 396   1          balance = (int16_t)slave_holding_registers[BALANCE_OFFSET];
+ 397   1          alert = (uint8_t)slave_holding_registers[LOW_BALANCE_ALERT_OFFSET];
+ 398   1          LCD_Command(0x0C);
+ 399   1          LCD_SetCursor(0, 0);
+ 400   1          LCD_WriteText("BAL:");
+ 401   1          used_columns = (uint8_t)(4 + LCD_WriteSignedInteger(balance));
+ 402   1          LCD_PadLine(0, used_columns);
+ 403   1          LCD_SetCursor(1, 0);
+ 404   1          LCD_WriteText("LOW BAL ALERT:");
+ 405   1          LCD_WriteChar(alert ? '1' : '0');
+ 406   1          LCD_WriteChar(' ');
+ 407   1      }
+ 408          
+ 409          static void LCD_ShowLoads(void)
+ 410          {
+ 411   1          LCD_Command(0x0C);
+ 412   1          LCD_SetCursor(0, 0);
+ 413   1          LCD_WriteText("MAIN:");
+ 414   1          LCD_WriteChar(slave_relay_states[0] ? '1' : '0');
+ 415   1          LCD_WriteText(" DG:");
+ 416   1          LCD_WriteChar(slave_relay_states[1] ? '1' : '0');
+ 417   1          LCD_PadLine(0, 11);
+ 418   1          LCD_SetCursor(1, 0);
+ 419   1          LCD_WriteText("SOLAR:");
+ 420   1          LCD_WriteChar(slave_relay_states[2] ? '1' : '0');
+ 421   1          LCD_PadLine(1, 7);
+ 422   1      }
+ 423          
+ 424          static void LCD_ShowRates(void)
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 8   
 
- 425   2              rtc_edit_active = 1;
- 426   2              RTC_AdjustSelectedDigit(1);
- 427   2          }
- 428   1          return 1;
- 429   1      }
- 430          
- 431          static void RTC_SetDefaultEditValue(void)
- 432          {
- 433   1          if (!rtc_datetime_valid)
- 434   1          {
- 435   2              rtc_datetime.year = 2000;
- 436   2              rtc_datetime.month = 1;
- 437   2              rtc_datetime.day = 1;
- 438   2              rtc_datetime.weekday = 6;
- 439   2              rtc_datetime.hours = 0;
- 440   2              rtc_datetime.minutes = 0;
- 441   2              rtc_datetime.seconds = 0;
- 442   2          }
- 443   1      }
- 444          
- 445          static uint8_t RTC_RestoreEepromSnapshot(void)
- 446          {
- 447   1          RTC_DateTime saved_datetime;
- 448   1      
- 449   1          if (!RTC_LoadDateTimeFromEEPROM(&saved_datetime) ||
- 450   1              !RTC_WriteDateTime(&saved_datetime))
- 451   1          {
- 452   2              return 0;
- 453   2          }
- 454   1          rtc_datetime.year = saved_datetime.year;
- 455   1          rtc_datetime.month = saved_datetime.month;
- 456   1          rtc_datetime.day = saved_datetime.day;
- 457   1          rtc_datetime.weekday = saved_datetime.weekday;
- 458   1          rtc_datetime.hours = saved_datetime.hours;
- 459   1          rtc_datetime.minutes = saved_datetime.minutes;
- 460   1          rtc_datetime.seconds = saved_datetime.seconds;
- 461   1          rtc_datetime_valid = 1;
- 462   1          return 1;
- 463   1      }
- 464          
- 465          static void RTC_SaveCurrentTimeToEeprom(void)
- 466          {
- 467   1          RTC_DateTime snapshot;
- 468   1      
- 469   1          snapshot.year = rtc_datetime.year;
- 470   1          snapshot.month = rtc_datetime.month;
- 471   1          snapshot.day = rtc_datetime.day;
- 472   1          snapshot.weekday = rtc_datetime.weekday;
- 473   1          snapshot.hours = rtc_datetime.hours;
- 474   1          snapshot.minutes = rtc_datetime.minutes;
- 475   1          snapshot.seconds = rtc_datetime.seconds;
- 476   1      
- 477   1          lcd_page = 1;
- 478   1          screen_switch_timer = 0;
- 479   1          rtc_save_message_ticks = RTC_SAVE_MESSAGE_TICKS;
- 480   1          if (rtc_datetime_valid && RTC_SaveDateTimeToEEPROM(&snapshot))
- 481   1          {
- 482   2              rtc_save_message = 1;
- 483   2              Board_Beep(50);
- 484   2              Board_DelayMs(70);
- 485   2              Board_Beep(50);
- 486   2          }
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 9   
+ 425          {
+ 426   1          uint8_t used_columns;
+ 427   1      
+ 428   1          LCD_Command(0x0C);
+ 429   1          LCD_SetCursor(0, 0);
+ 430   1          LCD_WriteText("M:");
+ 431   1          used_columns = (uint8_t)(2 + LCD_WriteUnsignedLong(
+ 432   1              slave_holding_registers[MAIN_RATE_OFFSET]));
+ 433   1          LCD_WriteText(" DG:");
+ 434   1          used_columns = (uint8_t)(used_columns + 4 + LCD_WriteUnsignedLong(
+ 435   1              slave_holding_registers[DG_RATE_OFFSET]));
+ 436   1          LCD_PadLine(0, used_columns);
+ 437   1          LCD_SetCursor(1, 0);
+ 438   1          LCD_WriteText("SOLAR:");
+ 439   1          used_columns = (uint8_t)(6 + LCD_WriteUnsignedLong(
+ 440   1              slave_holding_registers[SOLAR_RATE_OFFSET]));
+ 441   1          LCD_PadLine(1, used_columns);
+ 442   1      }
+ 443          
+ 444          static void LCD_ShowPage(uint8_t page)
+ 445          {
+ 446   1          switch (page)
+ 447   1          {
+ 448   2              case LCD_PAGE_COMPANY:
+ 449   2                  LCD_ShowCompanyName();
+ 450   2                  break;
+ 451   2              case LCD_PAGE_BALANCE:
+ 452   2                  LCD_ShowBalance();
+ 453   2                  break;
+ 454   2              case LCD_PAGE_LOADS:
+ 455   2                  LCD_ShowLoads();
+ 456   2                  break;
+ 457   2              case LCD_PAGE_RATES:
+ 458   2                  LCD_ShowRates();
+ 459   2                  break;
+ 460   2              case LCD_PAGE_METER:
+ 461   2                  lcd_values_initialized = 0;
+ 462   2                  LCD_ShowSlaveRegisters();
+ 463   2                  break;
+ 464   2              default:
+ 465   2                  LCD_ShowRtc();
+ 466   2                  break;
+ 467   2          }
+ 468   1      }
+ 469          
+ 470          static uint8_t RTC_IsLeapYear(uint16_t year)
+ 471          {
+ 472   1          return (uint8_t)(((year % 4) == 0) &&
+ 473   1              (((year % 100) != 0) || ((year % 400) == 0)));
+ 474   1      }
+ 475          
+ 476          static uint8_t RTC_DaysInMonth(uint16_t year, uint8_t month)
+ 477          {
+ 478   1          switch (month)
+ 479   1          {
+ 480   2              case 2:
+ 481   2                  return RTC_IsLeapYear(year) ? 29 : 28;
+ 482   2              case 4:
+ 483   2              case 6:
+ 484   2              case 9:
+ 485   2              case 11:
+ 486   2                  return 30;
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 9   
 
- 487   1          else
- 488   1          {
- 489   2              rtc_save_message = 2;
- 490   2              Board_Beep(150);
- 491   2          }
- 492   1      }
- 493          
- 494          void main(void)
- 495          {
- 496   1          uint8_t rtc_refresh_due;
- 497   1          uint8_t screen_changed;
- 498   1          uint8_t switch_events;
- 499   1          uint8_t switch_press_events;
- 500   1      
- 501   1          MODIFY_HIRC(HIRC_24);
- 502   1          SFRS = 0;
- 503   1          Board_Init();
- 504   1          I2C_Init();
- 505   1          RS485_TestInit();
- 506   1          RTC_ReadDateTime(&rtc_datetime);
- 507   1          if (!rtc_datetime_valid)
+ 487   2              default:
+ 488   2                  return 31;
+ 489   2          }
+ 490   1      }
+ 491          
+ 492          static uint8_t RTC_DateTimeIsValid(const RTC_DateTime *datetime)
+ 493          {
+ 494   1          return (uint8_t)(datetime->year >= 2000 && datetime->year <= 2199 &&
+ 495   1              datetime->month >= 1 && datetime->month <= 12 && datetime->day >= 1 &&
+ 496   1              datetime->day <= RTC_DaysInMonth(datetime->year, datetime->month) &&
+ 497   1              datetime->hours <= 23 && datetime->minutes <= 59 &&
+ 498   1              datetime->seconds <= 59);
+ 499   1      }
+ 500          
+ 501          static uint8_t RTC_CalculateWeekday(uint16_t year, uint8_t month, uint8_t day)
+ 502          {
+ 503   1          uint16_t century_year;
+ 504   1          uint16_t century;
+ 505   1          uint16_t weekday;
+ 506   1      
+ 507   1          if (month < 3)
  508   1          {
- 509   2              RTC_RestoreEepromSnapshot();
- 510   2          }
- 511   1          RTC_SetDefaultEditValue();
- 512   1          LCD_Init();
- 513   1          backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
- 514   1          LCD_ShowSlaveRegisters();
- 515   1      
- 516   1          while (1)
- 517   1          {
- 518   2              rtc_refresh_due = 0;
- 519   2              screen_changed = 0;
- 520   2              switch_events = 0;
- 521   2              RS485_Poll();
- 522   2              if (rtc_poll_timer >= 999)
- 523   2              {
- 524   3                  rtc_poll_timer = 0;
- 525   3                  RTC_ReadDateTime(&rtc_datetime);
- 526   3                  rtc_refresh_due = 1;
- 527   3              }
- 528   2              else
- 529   2              {
- 530   3                  rtc_poll_timer++;
- 531   3              }
- 532   2      
- 533   2              switch_events = Board_ReadSwitchPresses();
- 534   2              switch_press_events = (uint8_t)(switch_events &
- 535   2                  (BOARD_SWITCH_1 | BOARD_SWITCH_2 | BOARD_SWITCH_3));
- 536   2              if (switch_press_events != 0)
- 537   2              {
- 538   3                  Board_Beep(35);
- 539   3              }
- 540   2              if (RTC_HandleSwitchPresses(switch_press_events))
- 541   2              {
- 542   3                  screen_changed = 1;
- 543   3              }
- 544   2              if (switch_events & BOARD_SWITCH_1_LONG)
- 545   2              {
- 546   3                  RTC_SaveCurrentTimeToEeprom();
- 547   3                  screen_changed = 1;
- 548   3              }
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 10  
+ 509   2              month += 12;
+ 510   2              year--;
+ 511   2          }
+ 512   1          century_year = (uint16_t)(year % 100);
+ 513   1          century = (uint16_t)(year / 100);
+ 514   1          weekday = (uint16_t)((day + (13 * (month + 1)) / 5 + century_year +
+ 515   1              (century_year / 4) + (century / 4) + (5 * century)) % 7);
+ 516   1          return (uint8_t)((weekday + 6) % 7);
+ 517   1      }
+ 518          
+ 519          static uint16_t RTC_AdjustDigit(uint16_t value, uint16_t place,
+ 520                                          int8_t direction)
+ 521          {
+ 522   1          uint8_t digit;
+ 523   1          uint8_t changed_digit;
+ 524   1      
+ 525   1          digit = (uint8_t)((value / place) % 10);
+ 526   1          if (direction < 0)
+ 527   1          {
+ 528   2              changed_digit = (digit == 0) ? 9 : (uint8_t)(digit - 1);
+ 529   2          }
+ 530   1          else
+ 531   1          {
+ 532   2              changed_digit = (digit == 9) ? 0 : (uint8_t)(digit + 1);
+ 533   2          }
+ 534   1          return (uint16_t)(value - ((uint16_t)digit * place) +
+ 535   1                            ((uint16_t)changed_digit * place));
+ 536   1      }
+ 537          
+ 538          static uint8_t RTC_AdjustSelectedDigit(int8_t direction)
+ 539          {
+ 540   1          RTC_DateTime candidate;
+ 541   1          uint8_t digit;
+ 542   1      
+ 543   1          candidate.year = rtc_datetime.year;
+ 544   1          candidate.month = rtc_datetime.month;
+ 545   1          candidate.day = rtc_datetime.day;
+ 546   1          candidate.weekday = rtc_datetime.weekday;
+ 547   1          candidate.hours = rtc_datetime.hours;
+ 548   1          candidate.minutes = rtc_datetime.minutes;
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 10  
 
- 549   2      
- 550   2              if (rtc_edit_active)
- 551   2              {
- 552   3                  if (switch_events == 0 && rtc_edit_idle_timer < RTC_EDIT_TIMEOUT_TICKS)
- 553   3                  {
- 554   4                      rtc_edit_idle_timer++;
- 555   4                  }
- 556   3                  if (rtc_edit_idle_timer >= RTC_EDIT_TIMEOUT_TICKS)
- 557   3                  {
- 558   4                      rtc_edit_active = 0;
- 559   4                      screen_changed = 1;
- 560   4                  }
- 561   3                  if (rtc_edit_active)
- 562   3                  {
- 563   4                      lcd_page = 1;
- 564   4                      screen_switch_timer = 0;
- 565   4                  }
- 566   3              }
- 567   2      
- 568   2              if (rtc_save_message_ticks != 0)
- 569   2              {
- 570   3                  rtc_save_message_ticks--;
- 571   3                  if (rtc_save_message_ticks == 0)
- 572   3                  {
- 573   4                      rtc_save_message = 0;
- 574   4                      screen_changed = 1;
- 575   4                  }
- 576   3              }
- 577   2      
- 578   2              if (((back_light_on == BACK_LIGHT_ON) ? 1 : 0) != backlight_applied)
- 579   2              {
- 580   3                  LCD_ApplyBacklight();
- 581   3                  backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
- 582   3              }
- 583   2      
- 584   2              if (!rtc_edit_active && screen_switch_timer >= 2999)
- 585   2              {
- 586   3                  screen_switch_timer = 0;
- 587   3                  lcd_page ^= 1;
- 588   3                  screen_changed = 1;
- 589   3                  if (lcd_page == 0)
- 590   3                  {
- 591   4                      lcd_values_initialized = 0;
- 592   4                  }
- 593   3              }
- 594   2              else if (!rtc_edit_active)
- 595   2              {
- 596   3                  screen_switch_timer++;
- 597   3              }
- 598   2      
- 599   2              if (lcd_page == 0)
- 600   2              {
- 601   3                  LCD_ShowSlaveRegisters();
- 602   3              }
- 603   2              else if (screen_changed || rtc_refresh_due || switch_events)
- 604   2              {
- 605   3                  LCD_ShowRtc();
- 606   3              }
- 607   2              Board_DelayMs(1);
- 608   2          }
- 609   1      }
+ 549   1          candidate.seconds = rtc_datetime.seconds;
+ 550   1      
+ 551   1          digit = rtc_selected_digit;
+ 552   1          if (digit < 2)
+ 553   1          {
+ 554   2              candidate.day = (uint8_t)RTC_AdjustDigit(candidate.day,
+ 555   2                  (digit == 0) ? 10 : 1, direction);
+ 556   2          }
+ 557   1          else if (digit < 4)
+ 558   1          {
+ 559   2              candidate.month = (uint8_t)RTC_AdjustDigit(candidate.month,
+ 560   2                  (digit == 2) ? 10 : 1, direction);
+ 561   2          }
+ 562   1          else if (digit < 8)
+ 563   1          {
+ 564   2              candidate.year = RTC_AdjustDigit(candidate.year,
+ 565   2                  (digit == 4) ? 1000 : ((digit == 5) ? 100 :
+ 566   2                  ((digit == 6) ? 10 : 1)), direction);
+ 567   2          }
+ 568   1          else if (digit < 10)
+ 569   1          {
+ 570   2              candidate.hours = (uint8_t)RTC_AdjustDigit(candidate.hours,
+ 571   2                  (digit == 8) ? 10 : 1, direction);
+ 572   2          }
+ 573   1          else if (digit < 12)
+ 574   1          {
+ 575   2              candidate.minutes = (uint8_t)RTC_AdjustDigit(candidate.minutes,
+ 576   2                  (digit == 10) ? 10 : 1, direction);
+ 577   2          }
+ 578   1          else
+ 579   1          {
+ 580   2              candidate.seconds = (uint8_t)RTC_AdjustDigit(candidate.seconds,
+ 581   2                  (digit == 12) ? 10 : 1, direction);
+ 582   2          }
+ 583   1      
+ 584   1          if (!RTC_DateTimeIsValid(&candidate))
+ 585   1          {
+ 586   2              return 0;
+ 587   2          }
+ 588   1          candidate.weekday = RTC_CalculateWeekday(candidate.year,
+ 589   1              candidate.month, candidate.day);
+ 590   1          if (!RTC_WriteDateTime(&candidate))
+ 591   1          {
+ 592   2              return 0;
+ 593   2          }
+ 594   1      
+ 595   1          rtc_datetime.year = candidate.year;
+ 596   1          rtc_datetime.month = candidate.month;
+ 597   1          rtc_datetime.day = candidate.day;
+ 598   1          rtc_datetime.weekday = candidate.weekday;
+ 599   1          rtc_datetime.hours = candidate.hours;
+ 600   1          rtc_datetime.minutes = candidate.minutes;
+ 601   1          rtc_datetime.seconds = candidate.seconds;
+ 602   1          rtc_datetime_valid = 1;
+ 603   1          return 1;
+ 604   1      }
+ 605          
+ 606          static uint8_t RTC_HandleSwitchPresses(uint8_t switch_events)
+ 607          {
+ 608   1          if (switch_events == 0)
+ 609   1          {
+ 610   2              return 0;
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 11  
 
-C51 COMPILER V9.60.0.0   MAIN                                                              10/16/2026 17:44:18 PAGE 11  
+ 611   2          }
+ 612   1      
+ 613   1          lcd_page = LCD_PAGE_RTC;
+ 614   1          screen_switch_timer = 0;
+ 615   1          rtc_edit_idle_timer = 0;
+ 616   1      
+ 617   1          if (switch_events & BOARD_SWITCH_1)
+ 618   1          {
+ 619   2              if (rtc_edit_active)
+ 620   2              {
+ 621   3                  rtc_selected_digit++;
+ 622   3                  if (rtc_selected_digit >= RTC_EDIT_DIGIT_COUNT)
+ 623   3                  {
+ 624   4                      rtc_selected_digit = 0;
+ 625   4                  }
+ 626   3              }
+ 627   2              else
+ 628   2              {
+ 629   3                  rtc_selected_digit = 0;
+ 630   3              }
+ 631   2              rtc_edit_active = 1;
+ 632   2          }
+ 633   1          else if (switch_events & BOARD_SWITCH_2)
+ 634   1          {
+ 635   2              rtc_edit_active = 1;
+ 636   2              RTC_AdjustSelectedDigit(-1);
+ 637   2          }
+ 638   1          else if (switch_events & BOARD_SWITCH_3)
+ 639   1          {
+ 640   2              rtc_edit_active = 1;
+ 641   2              RTC_AdjustSelectedDigit(1);
+ 642   2          }
+ 643   1          return 1;
+ 644   1      }
+ 645          
+ 646          static void RTC_SetDefaultEditValue(void)
+ 647          {
+ 648   1          if (!rtc_datetime_valid)
+ 649   1          {
+ 650   2              rtc_datetime.year = 2000;
+ 651   2              rtc_datetime.month = 1;
+ 652   2              rtc_datetime.day = 1;
+ 653   2              rtc_datetime.weekday = 6;
+ 654   2              rtc_datetime.hours = 0;
+ 655   2              rtc_datetime.minutes = 0;
+ 656   2              rtc_datetime.seconds = 0;
+ 657   2          }
+ 658   1      }
+ 659          
+ 660          static uint8_t RTC_RestoreEepromSnapshot(void)
+ 661          {
+ 662   1          RTC_DateTime saved_datetime;
+ 663   1      
+ 664   1          if (!RTC_LoadDateTimeFromEEPROM(&saved_datetime) ||
+ 665   1              !RTC_WriteDateTime(&saved_datetime))
+ 666   1          {
+ 667   2              return 0;
+ 668   2          }
+ 669   1          rtc_datetime.year = saved_datetime.year;
+ 670   1          rtc_datetime.month = saved_datetime.month;
+ 671   1          rtc_datetime.day = saved_datetime.day;
+ 672   1          rtc_datetime.weekday = saved_datetime.weekday;
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 12  
+
+ 673   1          rtc_datetime.hours = saved_datetime.hours;
+ 674   1          rtc_datetime.minutes = saved_datetime.minutes;
+ 675   1          rtc_datetime.seconds = saved_datetime.seconds;
+ 676   1          rtc_datetime_valid = 1;
+ 677   1          return 1;
+ 678   1      }
+ 679          
+ 680          static void RTC_SaveCurrentTimeToEeprom(void)
+ 681          {
+ 682   1          RTC_DateTime snapshot;
+ 683   1      
+ 684   1          snapshot.year = rtc_datetime.year;
+ 685   1          snapshot.month = rtc_datetime.month;
+ 686   1          snapshot.day = rtc_datetime.day;
+ 687   1          snapshot.weekday = rtc_datetime.weekday;
+ 688   1          snapshot.hours = rtc_datetime.hours;
+ 689   1          snapshot.minutes = rtc_datetime.minutes;
+ 690   1          snapshot.seconds = rtc_datetime.seconds;
+ 691   1      
+ 692   1          lcd_page = LCD_PAGE_RTC;
+ 693   1          screen_switch_timer = 0;
+ 694   1          rtc_save_message_ticks = RTC_SAVE_MESSAGE_TICKS;
+ 695   1          if (rtc_datetime_valid && RTC_SaveDateTimeToEEPROM(&snapshot))
+ 696   1          {
+ 697   2              rtc_save_message = 1;
+ 698   2              Board_Beep(50);
+ 699   2              Board_DelayMs(70);
+ 700   2              Board_Beep(50);
+ 701   2          }
+ 702   1          else
+ 703   1          {
+ 704   2              rtc_save_message = 2;
+ 705   2              Board_Beep(150);
+ 706   2          }
+ 707   1      }
+ 708          
+ 709          void main(void)
+ 710          {
+ 711   1          uint8_t rtc_refresh_due;
+ 712   1          uint8_t screen_changed;
+ 713   1          uint8_t prepaid_events;
+ 714   1          uint8_t backlight_activity;
+ 715   1          uint16_t backlight_timeout;
+ 716   1          uint8_t switch_events;
+ 717   1          uint8_t switch_press_events;
+ 718   1          uint8_t stable_switches;
+ 719   1          uint8_t deferred_switches;
+ 720   1      
+ 721   1          MODIFY_HIRC(HIRC_24);
+ 722   1          SFRS = 0;
+ 723   1          Board_Init();
+ 724   1          I2C_Init();
+ 725   1          RS485_TestInit();
+ 726   1          RTC_ReadDateTime(&rtc_datetime);
+ 727   1          if (!rtc_datetime_valid)
+ 728   1          {
+ 729   2              RTC_RestoreEepromSnapshot();
+ 730   2          }
+ 731   1          RTC_SetDefaultEditValue();
+ 732   1          LCD_Init();
+ 733   1          backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
+ 734   1          LCD_ShowPage(lcd_page);
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 13  
+
+ 735   1      
+ 736   1          while (1)
+ 737   1          {
+ 738   2              rtc_refresh_due = 0;
+ 739   2              screen_changed = 0;
+ 740   2              backlight_activity = 0;
+ 741   2              switch_events = 0;
+ 742   2              RS485_Poll();
+ 743   2              prepaid_events = prepaid_ui_events;
+ 744   2              prepaid_ui_events = 0;
+ 745   2              if (prepaid_events & PREPAID_UI_EVENT_ACTIVITY)
+ 746   2              {
+ 747   3                  backlight_activity = 1;
+ 748   3              }
+ 749   2              if (prepaid_events & PREPAID_UI_EVENT_BALANCE)
+ 750   2              {
+ 751   3                  lcd_page = LCD_PAGE_BALANCE;
+ 752   3                  screen_changed = 1;
+ 753   3              }
+ 754   2              else if (prepaid_events & PREPAID_UI_EVENT_COMPANY)
+ 755   2              {
+ 756   3                  lcd_page = LCD_PAGE_COMPANY;
+ 757   3                  screen_changed = 1;
+ 758   3              }
+ 759   2              else if (prepaid_events & PREPAID_UI_EVENT_LOADS)
+ 760   2              {
+ 761   3                  lcd_page = LCD_PAGE_LOADS;
+ 762   3                  screen_changed = 1;
+ 763   3              }
+ 764   2              else if (prepaid_events & PREPAID_UI_EVENT_RATES)
+ 765   2              {
+ 766   3                  lcd_page = LCD_PAGE_RATES;
+ 767   3                  screen_changed = 1;
+ 768   3              }
+ 769   2              if (screen_changed)
+ 770   2              {
+ 771   3                  screen_switch_timer = 0;
+ 772   3                  rtc_edit_active = 0;
+ 773   3                  rtc_save_message = 0;
+ 774   3              }
+ 775   2              if (rtc_poll_timer >= 999)
+ 776   2              {
+ 777   3                  rtc_poll_timer = 0;
+ 778   3                  RTC_ReadDateTime(&rtc_datetime);
+ 779   3                  rtc_refresh_due = 1;
+ 780   3              }
+ 781   2              else
+ 782   2              {
+ 783   3                  rtc_poll_timer++;
+ 784   3              }
+ 785   2      
+ 786   2              switch_events = Board_ReadSwitchPresses();
+ 787   2              if (switch_events != 0)
+ 788   2              {
+ 789   3                  backlight_activity = 1;
+ 790   3              }
+ 791   2              switch_press_events = (uint8_t)(switch_events &
+ 792   2                  (BOARD_SWITCH_1 | BOARD_SWITCH_2 | BOARD_SWITCH_3));
+ 793   2              if (switch_press_events != 0)
+ 794   2              {
+ 795   3                  Board_Beep(35);
+ 796   3              }
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 14  
+
+ 797   2      
+ 798   2              if (switch_events & BOARD_SWITCH_2_3_LONG)
+ 799   2              {
+ 800   3                  pending_rtc_switch_events = 0;
+ 801   3                  pending_rtc_switch_ticks = 0;
+ 802   3                  rs485_info_active = 1;
+ 803   3                  rs485_info_port = 1;
+ 804   3                  rs485_info_page_ticks = 0;
+ 805   3                  screen_switch_timer = 0;
+ 806   3                  rtc_edit_active = 0;
+ 807   3                  rtc_save_message = 0;
+ 808   3                  screen_changed = 1;
+ 809   3              }
+ 810   2      
+ 811   2              if (rs485_info_active)
+ 812   2              {
+ 813   3                  pending_rtc_switch_events = 0;
+ 814   3                  pending_rtc_switch_ticks = 0;
+ 815   3              }
+ 816   2              else
+ 817   2              {
+ 818   3                  if (switch_press_events & BOARD_SWITCH_1)
+ 819   3                  {
+ 820   4                      if (RTC_HandleSwitchPresses(BOARD_SWITCH_1))
+ 821   4                      {
+ 822   5                          screen_changed = 1;
+ 823   5                      }
+ 824   4                  }
+ 825   3      
+ 826   3                  pending_rtc_switch_events |= (uint8_t)(switch_press_events &
+ 827   3                      (BOARD_SWITCH_2 | BOARD_SWITCH_3));
+ 828   3                  stable_switches = Board_GetStableSwitches();
+ 829   3                  if ((stable_switches & (BOARD_SWITCH_2 | BOARD_SWITCH_3)) ==
+ 830   3                      (BOARD_SWITCH_2 | BOARD_SWITCH_3))
+ 831   3                  {
+ 832   4                      pending_rtc_switch_ticks = 0;
+ 833   4                  }
+ 834   3                  else if (pending_rtc_switch_events != 0)
+ 835   3                  {
+ 836   4                      if (pending_rtc_switch_ticks < RTC_KEY_COMBO_DELAY_TICKS)
+ 837   4                      {
+ 838   5                          pending_rtc_switch_ticks++;
+ 839   5                      }
+ 840   4                      if (pending_rtc_switch_ticks >= RTC_KEY_COMBO_DELAY_TICKS)
+ 841   4                      {
+ 842   5                          deferred_switches = pending_rtc_switch_events;
+ 843   5                          pending_rtc_switch_events = 0;
+ 844   5                          pending_rtc_switch_ticks = 0;
+ 845   5                          if (RTC_HandleSwitchPresses(deferred_switches))
+ 846   5                          {
+ 847   6                              screen_changed = 1;
+ 848   6                          }
+ 849   5                      }
+ 850   4                  }
+ 851   3                  else
+ 852   3                  {
+ 853   4                      pending_rtc_switch_ticks = 0;
+ 854   4                  }
+ 855   3      
+ 856   3                  if (switch_events & BOARD_SWITCH_1_LONG)
+ 857   3                  {
+ 858   4                      RTC_SaveCurrentTimeToEeprom();
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 15  
+
+ 859   4                      screen_changed = 1;
+ 860   4                  }
+ 861   3      
+ 862   3                  if (rtc_edit_active)
+ 863   3                  {
+ 864   4                      if (switch_events == 0 &&
+ 865   4                          rtc_edit_idle_timer < RTC_EDIT_TIMEOUT_TICKS)
+ 866   4                      {
+ 867   5                          rtc_edit_idle_timer++;
+ 868   5                      }
+ 869   4                      if (rtc_edit_idle_timer >= RTC_EDIT_TIMEOUT_TICKS)
+ 870   4                      {
+ 871   5                          rtc_edit_active = 0;
+ 872   5                          screen_changed = 1;
+ 873   5                      }
+ 874   4                      if (rtc_edit_active)
+ 875   4                      {
+ 876   5                          lcd_page = LCD_PAGE_RTC;
+ 877   5                          screen_switch_timer = 0;
+ 878   5                      }
+ 879   4                  }
+ 880   3              }
+ 881   2      
+ 882   2              if (rs485_info_active)
+ 883   2              {
+ 884   3                  if (rs485_info_page_ticks < RS485_INFO_PAGE_TICKS)
+ 885   3                  {
+ 886   4                      rs485_info_page_ticks++;
+ 887   4                  }
+ 888   3                  if (rs485_info_page_ticks >= RS485_INFO_PAGE_TICKS)
+ 889   3                  {
+ 890   4                      rs485_info_page_ticks = 0;
+ 891   4                      if (rs485_info_port == 1)
+ 892   4                      {
+ 893   5                          rs485_info_port = 2;
+ 894   5                          screen_changed = 1;
+ 895   5                      }
+ 896   4                      else
+ 897   4                      {
+ 898   5                          rs485_info_active = 0;
+ 899   5                          screen_changed = 1;
+ 900   5                          if (lcd_page == LCD_PAGE_METER)
+ 901   5                          {
+ 902   6                              lcd_values_initialized = 0;
+ 903   6                          }
+ 904   5                      }
+ 905   4                  }
+ 906   3              }
+ 907   2      
+ 908   2              if (rtc_save_message_ticks != 0)
+ 909   2              {
+ 910   3                  rtc_save_message_ticks--;
+ 911   3                  if (rtc_save_message_ticks == 0)
+ 912   3                  {
+ 913   4                      rtc_save_message = 0;
+ 914   4                      screen_changed = 1;
+ 915   4                  }
+ 916   3              }
+ 917   2      
+ 918   2              backlight_timeout = slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET];
+ 919   2              if (backlight_timeout == 0)
+ 920   2              {
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 16  
+
+ 921   3                  backlight_idle_seconds = 0;
+ 922   3                  backlight_idle_ms = 0;
+ 923   3                  back_light_on = BACK_LIGHT_ON;
+ 924   3              }
+ 925   2              else if (backlight_activity)
+ 926   2              {
+ 927   3                  backlight_idle_seconds = 0;
+ 928   3                  backlight_idle_ms = 0;
+ 929   3                  back_light_on = BACK_LIGHT_ON;
+ 930   3              }
+ 931   2              else if (back_light_on == BACK_LIGHT_ON)
+ 932   2              {
+ 933   3                  backlight_idle_ms++;
+ 934   3                  if (backlight_idle_ms >= 1000)
+ 935   3                  {
+ 936   4                      backlight_idle_ms = 0;
+ 937   4                      if (backlight_idle_seconds < backlight_timeout)
+ 938   4                      {
+ 939   5                          backlight_idle_seconds++;
+ 940   5                      }
+ 941   4                      if (backlight_idle_seconds >= backlight_timeout)
+ 942   4                      {
+ 943   5                          back_light_on = BACK_LIGHT_OFF;
+ 944   5                      }
+ 945   4                  }
+ 946   3              }
+ 947   2      
+ 948   2              if (((back_light_on == BACK_LIGHT_ON) ? 1 : 0) != backlight_applied)
+ 949   2              {
+ 950   3                  LCD_ApplyBacklight();
+ 951   3                  backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
+ 952   3              }
+ 953   2      
+ 954   2              if (!rs485_info_active && !rtc_edit_active &&
+ 955   2                  screen_switch_timer >= 2999)
+ 956   2              {
+ 957   3                  screen_switch_timer = 0;
+ 958   3                  lcd_page++;
+ 959   3                  if (lcd_page >= LCD_PAGE_COUNT)
+ 960   3                  {
+ 961   4                      lcd_page = LCD_PAGE_COMPANY;
+ 962   4                  }
+ 963   3                  screen_changed = 1;
+ 964   3              }
+ 965   2              else if (!rs485_info_active && !rtc_edit_active)
+ 966   2              {
+ 967   3                  screen_switch_timer++;
+ 968   3              }
+ 969   2      
+ 970   2              if (rs485_info_active)
+ 971   2              {
+ 972   3                  if (screen_changed)
+ 973   3                  {
+ 974   4                      LCD_ShowRs485Settings(rs485_info_port);
+ 975   4                  }
+ 976   3              }
+ 977   2              else if (screen_changed ||
+ 978   2                  (lcd_page == LCD_PAGE_RTC && (rtc_refresh_due || switch_events)))
+ 979   2              {
+ 980   3                  LCD_ShowPage(lcd_page);
+ 981   3              }
+ 982   2              else if (lcd_page == LCD_PAGE_METER)
+C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 17  
+
+ 983   2              {
+ 984   3                  LCD_ShowSlaveRegisters();
+ 985   3              }
+ 986   2              Board_DelayMs(1);
+ 987   2          }
+ 988   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   3496    ----
-   CONSTANT SIZE    =    159    ----
-   XDATA SIZE       =     22      99
+   CODE SIZE        =   5146    ----
+   CONSTANT SIZE    =    231    ----
+   XDATA SIZE       =     33     136
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
    IDATA SIZE       =   ----    ----

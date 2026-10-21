@@ -4,8 +4,8 @@ This Keil C51/uVision firmware for the MS51PC0AE polls an energy meter on
 RS-485 port 2 and serves 50 holding registers as a Modbus RTU slave on RS-485
 port 1. It also controls three latching relays and exposes independent
 communication settings for both RS-485 ports.
-The onboard 16x2 LCD, driven through 74HC595 U3, alternates between two
-word-swapped meter floats and the PCF8563 RTC date and time.
+The onboard 16x2 LCD, driven through 74HC595 U3, cycles through prepaid status,
+word-swapped meter values, and the PCF8563 RTC date and time.
 
 ## Modbus and LCD data
 
@@ -33,6 +33,13 @@ word-swapped meter floats and the PCF8563 RTC date and time.
   | `40014` | Port 2 parity | `0` = none, `1` = even, `2` = odd |
   | `40015` | Port 2 meter slave ID | `1`–`247` |
 
+  Read the current settings with Modbus function `03` (Read Holding Registers),
+  starting at `40008` for eight registers (zero-based PDU offset `7`, quantity
+  `8`). The reply reports the active baud, parity, and slave IDs for both ports;
+  a baud value is returned high word first. If a baud change is being written
+  one word at a time, reads continue to report the active rate until the new
+  high/low pair is valid and applied.
+
   Supported baud rates are `4800`, `9600`, `14400`, `19200`, `38400`,
   `56000`, `57600`, and `115200`. Write `40008`/`40009` or `40012`/`40013`
   together with function `16` (`0x10`) when setting a two-word baud value. For example,
@@ -42,23 +49,62 @@ word-swapped meter floats and the PCF8563 RTC date and time.
   pair forms a supported rate. The response to a port 1 setting write is sent
   with the current connection settings before the new settings take effect.
   Valid settings are saved with a CRC in the AT24C64 EEPROM starting at address
-  `0x0060` and restored at startup. The remaining registers `40016` through
-  `40050` are auxiliary registers writable by functions `06` and `16` (`0x10`); they
-  start at zero and retain values until reset.
+  `0x0060` and restored at startup. Prepaid settings and balance data in
+  `40016`–`40030` are saved separately in the AT24C64 EEPROM.
+- Prepaid holding-register map (the addresses below are Modbus register labels;
+  use the matching zero-based protocol offsets in masters that request offsets):
+
+  | Holding register(s) | Meaning | Access and format |
+  | --- | --- | --- |
+  | `40016`–`40020` | Company name | Read/write, up to 10 ASCII characters, two per register, high byte first; default `PEMC` |
+  | `40021` | Recharge input / remaining balance | Write an unsigned 16-bit total recharge amount; reads return the signed 16-bit calculated balance |
+  | `40022` | Mains unit rate | Read/write unsigned integer |
+  | `40023` | DG unit rate | Read/write unsigned integer |
+  | `40024` | Solar unit rate | Read/write unsigned integer |
+  | `40025` | Low-balance threshold | Read/write unsigned integer |
+  | `40026` | Low-balance alert | Read-only: `1` when balance is negative or at/below the threshold; otherwise `0` |
+  | `40027` | Backlight timeout | Read/write seconds; `0` keeps the backlight on |
+  | `40028` | Mains cumulative consumption | Read/write unsigned integer total |
+  | `40029` | DG cumulative consumption | Read/write unsigned integer total |
+  | `40030` | Solar cumulative consumption | Read/write unsigned integer total |
+  | `40031` | BMS relay override | Read/write: `0` = automatic balance control; `1` = force all relays on |
+  | `40032` | Tamper status (SW4) | Read-only: `0` = pressed/not tampered; `1` = released/tampered |
+  | `40033`–`40050` | Reserved | — |
+
+  The balance is calculated as `total recharge amount - (Mains cumulative
+  consumption × Mains unit rate + DG cumulative consumption × DG unit rate +
+  Solar cumulative consumption × Solar unit rate)`. The result is negative
+  when calculated consumption cost exceeds the total recharge amount. Write
+  the total recharge amount to `40021`, and the firmware returns the calculated
+  remaining balance in that same register. Writes to `40021`, unit-rate writes,
+  and cumulative-consumption writes trigger recalculation. The result is signed
+  16-bit, clamped to `-32768` through `32767`; configure Modscan to display
+  `40021` as signed 16-bit to see negative balances. Rates, consumption, and
+  recharge input use unsigned integer values without decimal scaling. The
+  low-balance alert is `1` when the balance is negative or at or below the
+  configured threshold, otherwise `0`. Relay control follows the calculated
+  balance sign: a positive balance turns all three relays on, while zero or a
+  negative balance turns them off and blocks relay-on commands. Write `1` to
+  `40031` to force all relays on even when the balance is zero or negative;
+  write `0` to restore automatic balance control. The override is not saved
+  across a restart. SW4 is the active-low tamper input on P2.4: a pressed switch
+  reports `0` (not tampered), and a released switch reports `1` (tampered) in
+  `40032`.
 - The schematic uses latching relay SET/RESET coils. Firmware pulses the
   selected coil for 120 ms. Software relay states start at zero and update when
   commanded. The board has no relay contact feedback, so readback is not a
-  measurement of the physical contact. Relays are not forced to a state at
-  startup.
+  measurement of the physical contact. At startup, firmware synchronizes the
+  relays with the calculated balance and override register.
 - The LCD shows two IEEE-754 floats with two decimal places: `F1` combines
   `40002` as the high 16-bit word with `40001` as the low word; `F2` combines
   `40004` high with `40003` low. This is the 16-bit word-swapped format. The
   first four retained meter values are also the values served at `40001` through
   `40004`. Values loaded from the onboard EEPROM are shown at startup; without
   a saved value, the display starts at zero.
-- The display alternates every three seconds to a date/time page:
-  `DATE: DD:MM:YYYY` on row 1 and `TIME: HH:MM:SS` on row 2. If the RTC read is
-  invalid, it shows an RTC error message until editing starts.
+- The LCD rotates every three seconds through company name, remaining
+  balance/alert, Mains/DG/Solar load states, rates, meter values, and RTC. The
+  RTC page shows `DATE: DD:MM:YYYY` and `TIME: HH:MM:SS`; an invalid RTC read
+  shows an error until editing starts.
 - The board switches set the RTC while its page is selected. SW1 moves the
   blinking cursor digit through day tens/ones, month tens/ones, year
   thousands/hundreds/tens/ones, hour tens/ones, minute tens/ones, and second
@@ -66,7 +112,11 @@ word-swapped meter floats and the PCF8563 RTC date and time.
   selected digit. Each accepted change is written to the RTC immediately;
   impossible dates and out-of-range times are ignored. Editing keeps the RTC
   page visible and the LCD cursor blinking; after 30 seconds without a press,
-  the display resumes alternating pages.
+  the display resumes cycling through its pages.
+- Hold SW2 and SW3 together for about five seconds to show the active RS-485
+  settings. The LCD shows Port 1's baud rate, parity, and slave ID for three
+  seconds, then Port 2's settings for three seconds, before returning to the
+  previous display page.
 - Each debounced switch press gives a short buzzer beep. Hold SW1 for about five
   seconds to save the current valid RTC date/time to the AT24C64 EEPROM. A
   success/failure message is shown and a successful save gives two confirmation
@@ -80,16 +130,18 @@ word-swapped meter floats and the PCF8563 RTC date and time.
   restored values. The additional holding registers are unaffected.
 - The LCD is driven by onboard 74HC595 U3: serial data is on P2.1, shift clock
   on P2.2, and latch on P2.3. The global `back_light_on` variable controls its
-  active-low PNP backlight switch: `0` is off (the startup default), `1` is on.
-  Changing it while running takes effect immediately. The LCD data and RS bits
-  are set while Enable is low before Enable is pulsed.
+  active-low PNP backlight switch: `0` is off and `1` is on. Register `40027`
+  controls the idle timeout; zero keeps the backlight on. Local button presses
+  and changed Modbus values wake it. The LCD data and RS bits are set while
+  Enable is low before Enable is pulsed.
 - The GPIO-controlled status LEDs on P3.0 and P1.7 are held off. Four RS-485
   indicator LEDs are connected directly to the TX/RX signals and can still
   illuminate during bus activity.
 - The PCF8563 RTC is read once per second. `rtc_datetime` holds the decoded
   date and time; `rtc_datetime_valid` is cleared if I2C fails or the RTC's
   voltage-low flag says its time may be invalid. The three tactile switches
-  are active-low inputs on P3.5 (SW1), P3.2 (SW2), and P3.1 (SW3). If the RTC
+  are active-low inputs on P3.5 (SW1), P3.2 (SW2), and P3.1 (SW3). SW4 is the
+  active-low tamper switch on P2.4. If the RTC
   and EEPROM both have no valid time, the editor starts from 01:01:2000
   00:00:00; adjust it with the switches to write a valid time. The buzzer is
   driven on P3.4.
@@ -106,9 +158,11 @@ with correct polarity to keep the clock running when the main supply is off.
 4. Configure the meter for ID `4`, `9600 8E1`; configure the PC master for
   controller ID `1`, `9600 8E1`, and function `03` (Read Holding Registers).
   Read `40001` through `40050` for the data map. Use function `06` to write
-  `40005` through `40007` with `0` or `1` to operate relays 1 through 3. Use
+  `40005` through `40007` with `0` or `1` to operate relays 1 through 3 when
+  balance control permits; write `1` to `40031` to force all three on. Read
+  tamper status at `40032`. Use
   `40008` through `40015` to configure both UARTs, then reconnect the PC master
-  using the new port 1 settings. Registers `40016` through `40050` are auxiliary.
+  using the new port 1 settings.
 5. Keep each bus daisy-chained and terminate only its physical ends.
 
 ## Keil live-debug watch values
@@ -124,8 +178,8 @@ and slave state:
 - `energy_meter_registers[0]` through `[3]`: latest raw meter values.
 - `slave_holding_registers[0]` through `[49]`: holding registers 40001–40050;
   indices 0–3 mirror the meter, indices 4–6 are relay commands, indices 7–14
-  configure port 1 and port 2 baud/parity/IDs, and indices 15–49 are auxiliary
-  values.
+  configure port 1 and port 2 baud/parity/IDs, and indices 15–49 follow the
+  prepaid map above.
 - `slave_relay_states[0]` through `[2]`: commanded states for registers
   40005–40007.
 - `back_light_on`: `0` turns the LCD backlight off; `1` turns it on. Changes

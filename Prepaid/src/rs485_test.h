@@ -17,6 +17,30 @@
 #define SLAVE_PORT2_PARITY_OFFSET    13
 #define SLAVE_PORT2_ID_OFFSET       14
 
+/* Application registers follow the existing meter, relay, and RS-485 map. */
+#define COMPANY_NAME_FIRST_OFFSET   15
+#define COMPANY_NAME_REGISTER_COUNT 5
+/* 40021 accepts recharge writes and returns the signed calculated balance. */
+#define BALANCE_OFFSET              20
+#define MAIN_RATE_OFFSET            21
+#define DG_RATE_OFFSET              22
+#define SOLAR_RATE_OFFSET           23
+#define LOW_BALANCE_THRESHOLD_OFFSET 24
+#define LOW_BALANCE_ALERT_OFFSET    25
+#define BACKLIGHT_TIMEOUT_OFFSET    26
+#define MAIN_CONSUMPTION_OFFSET     27
+#define DG_CONSUMPTION_OFFSET       28
+#define SOLAR_CONSUMPTION_OFFSET    29
+/* Modbus labels 40031 and 40032; remaining registers are reserved. */
+#define BMS_RELAY_OVERRIDE_OFFSET  30
+#define TAMPER_STATUS_OFFSET       31
+
+#define PREPAID_UI_EVENT_COMPANY    0x01
+#define PREPAID_UI_EVENT_BALANCE    0x02
+#define PREPAID_UI_EVENT_LOADS      0x04
+#define PREPAID_UI_EVENT_RATES      0x08
+#define PREPAID_UI_EVENT_ACTIVITY   0x10
+
 /* Add these globals to Keil Watch 1 while the target is running. */
 extern volatile uint8_t energy_meter_connected;
 extern volatile uint8_t energy_meter_data_valid;
@@ -45,6 +69,7 @@ extern volatile uint16_t xdata energy_meter_registers[ENERGY_METER_REGISTER_COUN
 extern volatile uint16_t xdata s_energy_meter_registers[ENERGY_METER_REGISTER_COUNT];
 extern volatile uint16_t xdata slave_holding_registers[SLAVE_HOLDING_REGISTER_COUNT];
 extern volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
+extern volatile uint8_t prepaid_ui_events;
 
 /* energy_meter_last_error values */
 #define ENERGY_METER_ERROR_NONE          0
@@ -56,5 +81,7 @@ extern volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
 
 void RS485_TestInit(void);
 void RS485_Poll(void);
+void RS485_GetCommunicationSettings(uint8_t port, uint32_t *baud_rate,
+                                    uint8_t *parity, uint8_t *slave_id);
 
 #endif
