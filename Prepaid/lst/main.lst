@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 1   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
@@ -62,7 +62,7 @@ line level    source
   50   2              value /= 10UL;
   51   2          } while (value != 0 && digit_count < sizeof(digits));
   52   1      
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 2   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 2   
 
   53   1          for (index = 0; index < digit_count; index++)
   54   1          {
@@ -126,7 +126,7 @@ line level    source
  112   1          LCD_WriteText("SLAVE ID: ");
  113   1          line_length = (uint8_t)(10 + LCD_WriteUnsignedLong(slave_id));
  114   1          for (index = line_length; index < 16; index++) LCD_WriteChar(' ');
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 3   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 3   
 
  115   1      }
  116          
@@ -190,7 +190,7 @@ line level    source
  174   1          scaled_value = (unsigned long)(magnitude * 100.0f + 0.5f);
  175   1          integer_part = scaled_value / 100UL;
  176   1          fraction = (uint8_t)(scaled_value % 100UL);
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 4   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 4   
 
  177   1          digit_count = 0;
  178   1          do
@@ -223,7 +223,7 @@ line level    source
  205   1      
  206   1          for (index = 0; index < 4; index++)
  207   1          {
- 208   2              registers[index] = slave_holding_registers[index];
+ 208   2              registers[index] = s_energy_meter_registers[index];
  209   2          }
  210   1          if (lcd_values_initialized)
  211   1          {
@@ -254,7 +254,7 @@ line level    source
  236   1          lcd_values_initialized = 1;
  237   1      }
  238          
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 5   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 5   
 
  239          static void LCD_WriteTwoDigits(uint8_t value)
  240          {
@@ -318,7 +318,7 @@ line level    source
  298   1          LCD_WriteChar(':');
  299   1          LCD_WriteTwoDigits(rtc_datetime.seconds);
  300   1          LCD_WriteText("  ");
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 6   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 6   
 
  301   1      
  302   1          if (rtc_edit_active)
@@ -382,7 +382,7 @@ line level    source
  360   1      }
  361          
  362          static void LCD_ShowCompanyName(void)
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 7   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 7   
 
  363          {
  364   1          uint8_t index;
@@ -446,7 +446,7 @@ line level    source
  422   1      }
  423          
  424          static void LCD_ShowRates(void)
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 8   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 8   
 
  425          {
  426   1          uint8_t used_columns;
@@ -510,7 +510,7 @@ line level    source
  484   2              case 9:
  485   2              case 11:
  486   2                  return 30;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 9   
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 9   
 
  487   2              default:
  488   2                  return 31;
@@ -574,7 +574,7 @@ line level    source
  546   1          candidate.weekday = rtc_datetime.weekday;
  547   1          candidate.hours = rtc_datetime.hours;
  548   1          candidate.minutes = rtc_datetime.minutes;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 10  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 10  
 
  549   1          candidate.seconds = rtc_datetime.seconds;
  550   1      
@@ -638,7 +638,7 @@ line level    source
  608   1          if (switch_events == 0)
  609   1          {
  610   2              return 0;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 11  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 11  
 
  611   2          }
  612   1      
@@ -702,7 +702,7 @@ line level    source
  670   1          rtc_datetime.month = saved_datetime.month;
  671   1          rtc_datetime.day = saved_datetime.day;
  672   1          rtc_datetime.weekday = saved_datetime.weekday;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 12  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 12  
 
  673   1          rtc_datetime.hours = saved_datetime.hours;
  674   1          rtc_datetime.minutes = saved_datetime.minutes;
@@ -766,7 +766,7 @@ line level    source
  732   1          LCD_Init();
  733   1          backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
  734   1          LCD_ShowPage(lcd_page);
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 13  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 13  
 
  735   1      
  736   1          while (1)
@@ -830,7 +830,7 @@ line level    source
  794   2              {
  795   3                  Board_Beep(35);
  796   3              }
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 14  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 14  
 
  797   2      
  798   2              if (switch_events & BOARD_SWITCH_2_3_LONG)
@@ -894,7 +894,7 @@ line level    source
  856   3                  if (switch_events & BOARD_SWITCH_1_LONG)
  857   3                  {
  858   4                      RTC_SaveCurrentTimeToEeprom();
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 15  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 15  
 
  859   4                      screen_changed = 1;
  860   4                  }
@@ -958,7 +958,7 @@ line level    source
  918   2              backlight_timeout = slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET];
  919   2              if (backlight_timeout == 0)
  920   2              {
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 16  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 16  
 
  921   3                  backlight_idle_seconds = 0;
  922   3                  backlight_idle_ms = 0;
@@ -1022,7 +1022,7 @@ line level    source
  980   3                  LCD_ShowPage(lcd_page);
  981   3              }
  982   2              else if (lcd_page == LCD_PAGE_METER)
-C51 COMPILER V9.60.0.0   MAIN                                                              10/21/2026 16:11:21 PAGE 17  
+C51 COMPILER V9.60.0.0   MAIN                                                              10/23/2026 11:18:11 PAGE 17  
 
  983   2              {
  984   3                  LCD_ShowSlaveRegisters();

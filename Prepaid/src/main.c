@@ -205,7 +205,7 @@ static void LCD_ShowSlaveRegisters(void)
 
     for (index = 0; index < 4; index++)
     {
-        registers[index] = slave_holding_registers[index];
+        registers[index] = s_energy_meter_registers[index];
     }
     if (lcd_values_initialized)
     {

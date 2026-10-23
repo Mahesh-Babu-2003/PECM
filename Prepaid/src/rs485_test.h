@@ -3,37 +3,41 @@
 
 #include "ms51_device.h"
 
-#define ENERGY_METER_REGISTER_COUNT 4
+#define ENERGY_METER_REGISTER_COUNT 50
 #define SLAVE_HOLDING_REGISTER_COUNT 50
 #define SLAVE_RELAY_COUNT 3
+#define SLAVE_RESERVED_REGISTER_COUNT 0
 
-/* Zero-based offsets in the 40001..40050 slave holding-register table. */
-#define SLAVE_PORT1_BAUD_HIGH_OFFSET 7
-#define SLAVE_PORT1_BAUD_LOW_OFFSET  8
-#define SLAVE_PORT1_PARITY_OFFSET    9
-#define SLAVE_PORT1_ID_OFFSET       10
-#define SLAVE_PORT2_BAUD_HIGH_OFFSET 11
-#define SLAVE_PORT2_BAUD_LOW_OFFSET  12
-#define SLAVE_PORT2_PARITY_OFFSET    13
-#define SLAVE_PORT2_ID_OFFSET       14
+/* Zero-based offsets in the controller's 40001..40050 register table. */
+#define SLAVE_PORT1_BAUD_HIGH_OFFSET 3
+#define SLAVE_PORT1_BAUD_LOW_OFFSET  4
+#define SLAVE_PORT1_PARITY_OFFSET    5
+#define SLAVE_PORT1_ID_OFFSET        6
+#define SLAVE_PORT2_BAUD_HIGH_OFFSET 7
+#define SLAVE_PORT2_BAUD_LOW_OFFSET  8
+#define SLAVE_PORT2_PARITY_OFFSET    9
+#define SLAVE_PORT2_ID_OFFSET       10
 
-/* Application registers follow the existing meter, relay, and RS-485 map. */
-#define COMPANY_NAME_FIRST_OFFSET   15
+/* Relays now begin at 40001; meter data is served separately at 40201..40250. */
+#define SLAVE_RELAY_START           SLAVE_RESERVED_REGISTER_COUNT
+
+/* Application registers follow the relays and RS-485 map. */
+#define COMPANY_NAME_FIRST_OFFSET   11
 #define COMPANY_NAME_REGISTER_COUNT 5
-/* 40021 accepts recharge writes and returns the signed calculated balance. */
-#define BALANCE_OFFSET              20
-#define MAIN_RATE_OFFSET            21
-#define DG_RATE_OFFSET              22
-#define SOLAR_RATE_OFFSET           23
-#define LOW_BALANCE_THRESHOLD_OFFSET 24
-#define LOW_BALANCE_ALERT_OFFSET    25
-#define BACKLIGHT_TIMEOUT_OFFSET    26
-#define MAIN_CONSUMPTION_OFFSET     27
-#define DG_CONSUMPTION_OFFSET       28
-#define SOLAR_CONSUMPTION_OFFSET    29
-/* Modbus labels 40031 and 40032; remaining registers are reserved. */
-#define BMS_RELAY_OVERRIDE_OFFSET  30
-#define TAMPER_STATUS_OFFSET       31
+/* 40017 accepts recharge writes and returns the signed calculated balance. */
+#define BALANCE_OFFSET              16
+#define MAIN_RATE_OFFSET            17
+#define DG_RATE_OFFSET              18
+#define SOLAR_RATE_OFFSET           19
+#define LOW_BALANCE_THRESHOLD_OFFSET 20
+#define LOW_BALANCE_ALERT_OFFSET    21
+#define BACKLIGHT_TIMEOUT_OFFSET    22
+#define MAIN_CONSUMPTION_OFFSET     23
+#define DG_CONSUMPTION_OFFSET       24
+#define SOLAR_CONSUMPTION_OFFSET    25
+/* Modbus labels 40027 and 40028; remaining registers are reserved. */
+#define BMS_RELAY_OVERRIDE_OFFSET  26
+#define TAMPER_STATUS_OFFSET       27
 
 #define PREPAID_UI_EVENT_COMPANY    0x01
 #define PREPAID_UI_EVENT_BALANCE    0x02

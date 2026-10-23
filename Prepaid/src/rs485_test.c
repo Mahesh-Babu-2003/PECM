@@ -11,8 +11,8 @@
 #define RS485_PARITY_ODD        2
 #define METER_REGISTER_START    0
 #define METER_REGISTER_COUNT    ENERGY_METER_REGISTER_COUNT
+#define METER_SLAVE_HOLDING_START_OFFSET 200
 #define SLAVE_REGISTER_COUNT    SLAVE_HOLDING_REGISTER_COUNT
-#define SLAVE_RELAY_START       ENERGY_METER_REGISTER_COUNT
 #define COMM_CONFIG_FIRST_INDEX SLAVE_PORT1_BAUD_HIGH_OFFSET
 #define COMM_CONFIG_WORD_COUNT  8
 #define RTU_FRAME_GAP_MS        4
@@ -20,8 +20,9 @@
 #define MASTER_POLL_INTERVAL_MS 1000
 #define RX_BUFFER_SIZE          128
 #define METER_EEPROM_ADDRESS    0x50
-#define METER_EEPROM_OFFSET     0x0020
-#define METER_EEPROM_RECORD_SIZE 14
+#define METER_EEPROM_OFFSET     0x0100
+#define METER_EEPROM_PAGE_SIZE  32
+#define METER_EEPROM_RECORD_SIZE (6 + (METER_REGISTER_COUNT * 2))
 #define METER_EEPROM_SAVE_INTERVAL_MS 60000UL
 #define COMM_CONFIG_EEPROM_OFFSET 0x0060
 #define COMM_CONFIG_RECORD_SIZE 21
@@ -56,7 +57,7 @@ static uint8_t comm_config_pending;
 volatile uint16_t xdata energy_meter_registers[METER_REGISTER_COUNT];
 /* Last successfully received meter values; retained across poll timeouts/errors. */
 volatile uint16_t xdata s_energy_meter_registers[METER_REGISTER_COUNT];
-/* Modbus offsets 0..49 serve holding registers 40001..40050. */
+/* Controller holding registers 40001..40050; meter data is served at 40201..40250. */
 volatile uint16_t xdata slave_holding_registers[SLAVE_REGISTER_COUNT];
 volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
 static uint8_t relay_state_known[SLAVE_RELAY_COUNT];
@@ -196,7 +197,7 @@ static uint8_t RS485_IsCommunicationConfigOffset(uint16_t offset)
 static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
                                                    uint16_t value)
 {
-    if (offset < ENERGY_METER_REGISTER_COUNT ||
+    if (offset < SLAVE_RELAY_START ||
         offset >= SLAVE_REGISTER_COUNT)
     {
         return 0;
@@ -434,16 +435,33 @@ error:
 static uint8_t MeterEeprom_WriteRecord(void)
 {
     uint8_t index;
+    uint8_t page_index;
+    uint8_t page_length;
+    uint16_t eeprom_address;
 
-    for (index = 0; index < METER_EEPROM_RECORD_SIZE; index++)
+    index = 0;
+    while (index < METER_EEPROM_RECORD_SIZE)
     {
+        eeprom_address = METER_EEPROM_OFFSET + index;
+        page_length = (uint8_t)(METER_EEPROM_PAGE_SIZE -
+            (eeprom_address % METER_EEPROM_PAGE_SIZE));
+        if (page_length > (METER_EEPROM_RECORD_SIZE - index))
+        {
+            page_length = (uint8_t)(METER_EEPROM_RECORD_SIZE - index);
+        }
+
         if (!MeterEeprom_Start()) goto error;
         if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
-        if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_OFFSET >> 8), 0x28)) goto error;
-        if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_OFFSET + index), 0x28)) goto error;
-        if (!MeterEeprom_WriteI2cByte(meter_eeprom_record[index], 0x28)) goto error;
+        if (!MeterEeprom_WriteI2cByte((uint8_t)(eeprom_address >> 8), 0x28)) goto error;
+        if (!MeterEeprom_WriteI2cByte((uint8_t)eeprom_address, 0x28)) goto error;
+        for (page_index = 0; page_index < page_length; page_index++)
+        {
+            if (!MeterEeprom_WriteI2cByte(
+                    meter_eeprom_record[index + page_index], 0x28)) goto error;
+        }
         MeterEeprom_Stop();
         Board_DelayMs(5);
+        index = (uint8_t)(index + page_length);
     }
     return 1;
 
@@ -466,9 +484,9 @@ static void MeterEeprom_BuildRecord(void)
         meter_eeprom_record[4 + index * 2] = (uint8_t)(s_energy_meter_registers[index] >> 8);
         meter_eeprom_record[5 + index * 2] = (uint8_t)s_energy_meter_registers[index];
     }
-    crc = Modbus_Crc16(meter_eeprom_record, 12);
-    meter_eeprom_record[12] = (uint8_t)crc;
-    meter_eeprom_record[13] = (uint8_t)(crc >> 8);
+    crc = Modbus_Crc16(meter_eeprom_record, METER_EEPROM_RECORD_SIZE - 2);
+    meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 2] = (uint8_t)crc;
+    meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
 }
 
 static void MeterEeprom_Load(void)
@@ -483,11 +501,11 @@ static void MeterEeprom_Load(void)
         meter_eeprom_last_error = 1;
         return;
     }
-    crc = Modbus_Crc16(meter_eeprom_record, 12);
+    crc = Modbus_Crc16(meter_eeprom_record, METER_EEPROM_RECORD_SIZE - 2);
     if (meter_eeprom_record[0] != 0x4D || meter_eeprom_record[1] != 0x52 ||
         meter_eeprom_record[2] != 1 || meter_eeprom_record[3] != METER_REGISTER_COUNT ||
-        meter_eeprom_record[12] != (uint8_t)crc ||
-        meter_eeprom_record[13] != (uint8_t)(crc >> 8))
+        meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 2] != (uint8_t)crc ||
+        meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
     {
         meter_eeprom_last_error = 2;
         return;
@@ -498,7 +516,6 @@ static void MeterEeprom_Load(void)
             ((uint16_t)meter_eeprom_record[4 + index * 2] << 8) |
             meter_eeprom_record[5 + index * 2];
         energy_meter_registers[index] = s_energy_meter_registers[index];
-        slave_holding_registers[index] = s_energy_meter_registers[index];
         meter_eeprom_last_saved[index] = s_energy_meter_registers[index];
     }
     meter_eeprom_has_saved_record = 1;
@@ -1408,7 +1425,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             return;
         }
 
-        /* 40001..40050 use offsets 0..49; relays occupy offsets 4..6. */
+        /* Controller registers use offsets 0..49; meter data uses 200..249. */
         if (start_address < SLAVE_REGISTER_COUNT)
         {
             if ((uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
@@ -1436,6 +1453,19 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                 {
                     value = slave_holding_registers[register_offset];
                 }
+                tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
+                tx_buffer[4 + (index * 2)] = (uint8_t)value;
+            }
+        }
+        else if (start_address >= METER_SLAVE_HOLDING_START_OFFSET &&
+                 (uint32_t)start_address + quantity <=
+                    (METER_SLAVE_HOLDING_START_OFFSET + METER_REGISTER_COUNT))
+        {
+            for (index = 0; index < quantity; index++)
+            {
+                register_offset = (uint16_t)(start_address + index -
+                    METER_SLAVE_HOLDING_START_OFFSET);
+                value = s_energy_meter_registers[register_offset];
                 tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
                 tx_buffer[4 + (index * 2)] = (uint8_t)value;
             }
@@ -1472,7 +1502,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
         if (!RS485_IsWritableRegisterValueValid(start_address, value))
         {
             Modbus_SendException(function,
-                (start_address < ENERGY_METER_REGISTER_COUNT) ? 0x02 : 0x03);
+                (start_address < SLAVE_RELAY_START) ? 0x02 : 0x03);
             return;
         }
         change_flags = 0;
@@ -1541,7 +1571,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             Modbus_SendException(function, 0x03);
             return;
         }
-        if (start_address < ENERGY_METER_REGISTER_COUNT ||
+        if (start_address < SLAVE_RELAY_START ||
             (uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
         {
             Modbus_SendException(function, 0x02);
@@ -1723,7 +1753,6 @@ static void RS485_HandleMeterResponse(uint8_t length)
             port2_rx_buffer[4 + (index * 2)];
 
         s_energy_meter_registers[index] = energy_meter_registers[index];
-        slave_holding_registers[index] = energy_meter_registers[index];
     }
     energy_meter_connected = 1;
     energy_meter_data_valid = 1;

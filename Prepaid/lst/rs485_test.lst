@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 1   
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE RS485_TEST
@@ -23,8 +23,8 @@ line level    source
   11          #define RS485_PARITY_ODD        2
   12          #define METER_REGISTER_START    0
   13          #define METER_REGISTER_COUNT    ENERGY_METER_REGISTER_COUNT
-  14          #define SLAVE_REGISTER_COUNT    SLAVE_HOLDING_REGISTER_COUNT
-  15          #define SLAVE_RELAY_START       ENERGY_METER_REGISTER_COUNT
+  14          #define METER_SLAVE_HOLDING_START_OFFSET 200
+  15          #define SLAVE_REGISTER_COUNT    SLAVE_HOLDING_REGISTER_COUNT
   16          #define COMM_CONFIG_FIRST_INDEX SLAVE_PORT1_BAUD_HIGH_OFFSET
   17          #define COMM_CONFIG_WORD_COUNT  8
   18          #define RTU_FRAME_GAP_MS        4
@@ -32,1995 +32,2026 @@ line level    source
   20          #define MASTER_POLL_INTERVAL_MS 1000
   21          #define RX_BUFFER_SIZE          128
   22          #define METER_EEPROM_ADDRESS    0x50
-  23          #define METER_EEPROM_OFFSET     0x0020
-  24          #define METER_EEPROM_RECORD_SIZE 14
-  25          #define METER_EEPROM_SAVE_INTERVAL_MS 60000UL
-  26          #define COMM_CONFIG_EEPROM_OFFSET 0x0060
-  27          #define COMM_CONFIG_RECORD_SIZE 21
-  28          #define PREPAID_EEPROM_OFFSET 0x0080
-  29          #define PREPAID_RECORD_SIZE 60
-  30          #define PREPAID_SAVE_DELAY_MS 500UL
-  31          
-  32          #define PREPAID_CHANGE_COMPANY     0x01
-  33          #define PREPAID_CHANGE_LOADS       0x02
-  34          #define PREPAID_CHANGE_RATES       0x04
-  35          #define PREPAID_CHANGE_THRESHOLD   0x08
-  36          #define PREPAID_CHANGE_BACKLIGHT   0x10
-  37          #define PREPAID_CHANGE_CONSUMPTION 0x20
-  38          #define PREPAID_CHANGE_CREDIT      0x40
-  39          #define PREPAID_CHANGE_OVERRIDE    0x80
-  40          
-  41          #define I2C_SI                  0x08
-  42          #define I2C_STO                 0x10
-  43          #define I2C_STA                 0x20
-  44          #define I2C_ENABLE              0x40
-  45          
-  46          static uint8_t xdata port1_rx_buffer[RX_BUFFER_SIZE];
-  47          static uint8_t xdata port2_rx_buffer[RX_BUFFER_SIZE];
-  48          static uint8_t xdata tx_buffer[RX_BUFFER_SIZE];
-  49          static uint32_t port1_baud_rate;
-  50          static uint32_t port2_baud_rate;
-  51          static volatile uint8_t port1_parity;
-  52          static volatile uint8_t port2_parity;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 2   
+  23          #define METER_EEPROM_OFFSET     0x0100
+  24          #define METER_EEPROM_PAGE_SIZE  32
+  25          #define METER_EEPROM_RECORD_SIZE (6 + (METER_REGISTER_COUNT * 2))
+  26          #define METER_EEPROM_SAVE_INTERVAL_MS 60000UL
+  27          #define COMM_CONFIG_EEPROM_OFFSET 0x0060
+  28          #define COMM_CONFIG_RECORD_SIZE 21
+  29          #define PREPAID_EEPROM_OFFSET 0x0080
+  30          #define PREPAID_RECORD_SIZE 60
+  31          #define PREPAID_SAVE_DELAY_MS 500UL
+  32          
+  33          #define PREPAID_CHANGE_COMPANY     0x01
+  34          #define PREPAID_CHANGE_LOADS       0x02
+  35          #define PREPAID_CHANGE_RATES       0x04
+  36          #define PREPAID_CHANGE_THRESHOLD   0x08
+  37          #define PREPAID_CHANGE_BACKLIGHT   0x10
+  38          #define PREPAID_CHANGE_CONSUMPTION 0x20
+  39          #define PREPAID_CHANGE_CREDIT      0x40
+  40          #define PREPAID_CHANGE_OVERRIDE    0x80
+  41          
+  42          #define I2C_SI                  0x08
+  43          #define I2C_STO                 0x10
+  44          #define I2C_STA                 0x20
+  45          #define I2C_ENABLE              0x40
+  46          
+  47          static uint8_t xdata port1_rx_buffer[RX_BUFFER_SIZE];
+  48          static uint8_t xdata port2_rx_buffer[RX_BUFFER_SIZE];
+  49          static uint8_t xdata tx_buffer[RX_BUFFER_SIZE];
+  50          static uint32_t port1_baud_rate;
+  51          static uint32_t port2_baud_rate;
+  52          static volatile uint8_t port1_parity;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 2   
 
-  53          static uint8_t port1_slave_id;
-  54          static uint8_t meter_slave_id;
-  55          static uint8_t comm_config_pending;
-  56          volatile uint16_t xdata energy_meter_registers[METER_REGISTER_COUNT];
-  57          /* Last successfully received meter values; retained across poll timeouts/errors. */
-  58          volatile uint16_t xdata s_energy_meter_registers[METER_REGISTER_COUNT];
-  59          /* Modbus offsets 0..49 serve holding registers 40001..40050. */
-  60          volatile uint16_t xdata slave_holding_registers[SLAVE_REGISTER_COUNT];
-  61          volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
-  62          static uint8_t relay_state_known[SLAVE_RELAY_COUNT];
-  63          
-  64          volatile uint8_t energy_meter_connected;
-  65          volatile uint8_t energy_meter_data_valid;
-  66          volatile uint16_t energy_meter_successful_responses;
-  67          volatile uint8_t energy_meter_master_state;
-  68          volatile uint16_t energy_meter_poll_count;
-  69          volatile uint16_t energy_meter_request_count;
-  70          volatile uint8_t energy_meter_last_error;
-  71          volatile uint16_t energy_meter_timeout_count;
-  72          volatile uint16_t energy_meter_parity_error_count;
-  73          volatile uint16_t energy_meter_invalid_frame_count;
-  74          volatile uint8_t energy_meter_last_exception;
-  75          volatile uint16_t port1_rx_byte_count;
-  76          volatile uint16_t port1_parity_error_count;
-  77          volatile uint16_t port1_valid_request_count;
-  78          volatile uint16_t port1_response_count;
-  79          volatile uint16_t port1_bad_crc_count;
-  80          volatile uint16_t port1_wrong_address_count;
-  81          volatile uint8_t port1_last_frame_length;
-  82          volatile uint8_t xdata port1_last_frame[8];
-  83          volatile uint8_t meter_eeprom_present;
-  84          volatile uint8_t meter_eeprom_loaded;
-  85          volatile uint8_t meter_eeprom_last_error;
-  86          volatile uint16_t meter_eeprom_save_count;
-  87          volatile uint8_t prepaid_ui_events;
-  88          static volatile uint8_t port1_rx_length;
-  89          static volatile uint8_t port2_rx_length;
-  90          static volatile uint8_t port1_silence_ms;
-  91          static volatile uint8_t port2_silence_ms;
-  92          static volatile uint8_t port1_rx_parity_error;
-  93          static volatile uint8_t port2_rx_parity_error;
-  94          static volatile uint8_t port1_tx_complete;
-  95          static volatile uint8_t port2_tx_complete;
-  96          static uint8_t master_waiting;
-  97          static uint16_t master_timer_ms;
-  98          static uint16_t master_timeout_ms;
-  99          static uint16_t xdata meter_eeprom_last_saved[METER_REGISTER_COUNT];
- 100          static uint8_t xdata meter_eeprom_record[METER_EEPROM_RECORD_SIZE];
- 101          static uint8_t xdata comm_config_record[COMM_CONFIG_RECORD_SIZE];
- 102          static uint8_t xdata comm_config_verify[COMM_CONFIG_RECORD_SIZE];
- 103          static uint16_t xdata comm_config_backup[COMM_CONFIG_WORD_COUNT];
- 104          static uint8_t xdata prepaid_eeprom_record[PREPAID_RECORD_SIZE];
- 105          static uint8_t xdata prepaid_eeprom_verify[PREPAID_RECORD_SIZE];
- 106          static uint16_t prepaid_total_recharge_amount;
- 107          static uint8_t prepaid_relay_sync_pending;
- 108          static uint8_t prepaid_save_pending;
- 109          static uint32_t prepaid_save_timer_ms;
- 110          static uint8_t meter_eeprom_save_pending;
- 111          static uint8_t meter_eeprom_has_saved_record;
- 112          static uint32_t meter_eeprom_save_timer_ms;
- 113          
- 114          static uint8_t Prepaid_CompanyRegisterIsValid(uint16_t value);
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 3   
+  53          static volatile uint8_t port2_parity;
+  54          static uint8_t port1_slave_id;
+  55          static uint8_t meter_slave_id;
+  56          static uint8_t comm_config_pending;
+  57          volatile uint16_t xdata energy_meter_registers[METER_REGISTER_COUNT];
+  58          /* Last successfully received meter values; retained across poll timeouts/errors. */
+  59          volatile uint16_t xdata s_energy_meter_registers[METER_REGISTER_COUNT];
+  60          /* Controller holding registers 40001..40050; meter data is served at 40201..40250. */
+  61          volatile uint16_t xdata slave_holding_registers[SLAVE_REGISTER_COUNT];
+  62          volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
+  63          static uint8_t relay_state_known[SLAVE_RELAY_COUNT];
+  64          
+  65          volatile uint8_t energy_meter_connected;
+  66          volatile uint8_t energy_meter_data_valid;
+  67          volatile uint16_t energy_meter_successful_responses;
+  68          volatile uint8_t energy_meter_master_state;
+  69          volatile uint16_t energy_meter_poll_count;
+  70          volatile uint16_t energy_meter_request_count;
+  71          volatile uint8_t energy_meter_last_error;
+  72          volatile uint16_t energy_meter_timeout_count;
+  73          volatile uint16_t energy_meter_parity_error_count;
+  74          volatile uint16_t energy_meter_invalid_frame_count;
+  75          volatile uint8_t energy_meter_last_exception;
+  76          volatile uint16_t port1_rx_byte_count;
+  77          volatile uint16_t port1_parity_error_count;
+  78          volatile uint16_t port1_valid_request_count;
+  79          volatile uint16_t port1_response_count;
+  80          volatile uint16_t port1_bad_crc_count;
+  81          volatile uint16_t port1_wrong_address_count;
+  82          volatile uint8_t port1_last_frame_length;
+  83          volatile uint8_t xdata port1_last_frame[8];
+  84          volatile uint8_t meter_eeprom_present;
+  85          volatile uint8_t meter_eeprom_loaded;
+  86          volatile uint8_t meter_eeprom_last_error;
+  87          volatile uint16_t meter_eeprom_save_count;
+  88          volatile uint8_t prepaid_ui_events;
+  89          static volatile uint8_t port1_rx_length;
+  90          static volatile uint8_t port2_rx_length;
+  91          static volatile uint8_t port1_silence_ms;
+  92          static volatile uint8_t port2_silence_ms;
+  93          static volatile uint8_t port1_rx_parity_error;
+  94          static volatile uint8_t port2_rx_parity_error;
+  95          static volatile uint8_t port1_tx_complete;
+  96          static volatile uint8_t port2_tx_complete;
+  97          static uint8_t master_waiting;
+  98          static uint16_t master_timer_ms;
+  99          static uint16_t master_timeout_ms;
+ 100          static uint16_t xdata meter_eeprom_last_saved[METER_REGISTER_COUNT];
+ 101          static uint8_t xdata meter_eeprom_record[METER_EEPROM_RECORD_SIZE];
+ 102          static uint8_t xdata comm_config_record[COMM_CONFIG_RECORD_SIZE];
+ 103          static uint8_t xdata comm_config_verify[COMM_CONFIG_RECORD_SIZE];
+ 104          static uint16_t xdata comm_config_backup[COMM_CONFIG_WORD_COUNT];
+ 105          static uint8_t xdata prepaid_eeprom_record[PREPAID_RECORD_SIZE];
+ 106          static uint8_t xdata prepaid_eeprom_verify[PREPAID_RECORD_SIZE];
+ 107          static uint16_t prepaid_total_recharge_amount;
+ 108          static uint8_t prepaid_relay_sync_pending;
+ 109          static uint8_t prepaid_save_pending;
+ 110          static uint32_t prepaid_save_timer_ms;
+ 111          static uint8_t meter_eeprom_save_pending;
+ 112          static uint8_t meter_eeprom_has_saved_record;
+ 113          static uint32_t meter_eeprom_save_timer_ms;
+ 114          
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 3   
 
- 115          static void PrepaidEeprom_RequestSave(void);
- 116          
- 117          static uint8_t RS485_EvenParity(uint8_t value)
- 118          {
- 119   1          uint8_t parity;
- 120   1      
- 121   1          parity = 0;
- 122   1          while (value != 0)
- 123   1          {
- 124   2              parity ^= (value & 1);
- 125   2              value >>= 1;
- 126   2          }
- 127   1          return parity;
- 128   1      }
- 129          
- 130          static uint8_t RS485_ParityBit(uint8_t value, uint8_t parity_mode)
- 131          {
- 132   1          uint8_t parity_bit;
- 133   1      
- 134   1          if (parity_mode == RS485_PARITY_NONE)
- 135   1          {
- 136   2              return 0;
- 137   2          }
- 138   1          parity_bit = RS485_EvenParity(value);
- 139   1          if (parity_mode == RS485_PARITY_ODD)
- 140   1          {
- 141   2              parity_bit ^= 1;
- 142   2          }
- 143   1          return parity_bit;
- 144   1      }
- 145          
- 146          static uint32_t RS485_ReadConfiguredBaud(uint8_t high_word_offset)
- 147          {
- 148   1          return (((uint32_t)slave_holding_registers[high_word_offset] << 16) |
- 149   1                  slave_holding_registers[high_word_offset + 1]);
- 150   1      }
- 151          
- 152          static uint8_t RS485_BaudIsSupported(uint32_t baud_rate)
- 153          {
- 154   1          switch (baud_rate)
- 155   1          {
- 156   2              case 4800UL:
- 157   2              case 9600UL:
- 158   2              case 14400UL:
- 159   2              case 19200UL:
- 160   2              case 38400UL:
- 161   2              case 56000UL:
- 162   2              case 57600UL:
- 163   2              case 115200UL:
- 164   2                  return 1;
- 165   2              default:
- 166   2                  return 0;
- 167   2          }
- 168   1      }
- 169          
- 170          static uint8_t RS485_ConfigRegistersAreValid(void)
- 171          {
- 172   1          uint32_t baud1;
- 173   1          uint32_t baud2;
- 174   1          uint16_t slave_id1;
- 175   1          uint16_t slave_id2;
- 176   1      
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 4   
+ 115          static uint8_t Prepaid_CompanyRegisterIsValid(uint16_t value);
+ 116          static void PrepaidEeprom_RequestSave(void);
+ 117          
+ 118          static uint8_t RS485_EvenParity(uint8_t value)
+ 119          {
+ 120   1          uint8_t parity;
+ 121   1      
+ 122   1          parity = 0;
+ 123   1          while (value != 0)
+ 124   1          {
+ 125   2              parity ^= (value & 1);
+ 126   2              value >>= 1;
+ 127   2          }
+ 128   1          return parity;
+ 129   1      }
+ 130          
+ 131          static uint8_t RS485_ParityBit(uint8_t value, uint8_t parity_mode)
+ 132          {
+ 133   1          uint8_t parity_bit;
+ 134   1      
+ 135   1          if (parity_mode == RS485_PARITY_NONE)
+ 136   1          {
+ 137   2              return 0;
+ 138   2          }
+ 139   1          parity_bit = RS485_EvenParity(value);
+ 140   1          if (parity_mode == RS485_PARITY_ODD)
+ 141   1          {
+ 142   2              parity_bit ^= 1;
+ 143   2          }
+ 144   1          return parity_bit;
+ 145   1      }
+ 146          
+ 147          static uint32_t RS485_ReadConfiguredBaud(uint8_t high_word_offset)
+ 148          {
+ 149   1          return (((uint32_t)slave_holding_registers[high_word_offset] << 16) |
+ 150   1                  slave_holding_registers[high_word_offset + 1]);
+ 151   1      }
+ 152          
+ 153          static uint8_t RS485_BaudIsSupported(uint32_t baud_rate)
+ 154          {
+ 155   1          switch (baud_rate)
+ 156   1          {
+ 157   2              case 4800UL:
+ 158   2              case 9600UL:
+ 159   2              case 14400UL:
+ 160   2              case 19200UL:
+ 161   2              case 38400UL:
+ 162   2              case 56000UL:
+ 163   2              case 57600UL:
+ 164   2              case 115200UL:
+ 165   2                  return 1;
+ 166   2              default:
+ 167   2                  return 0;
+ 168   2          }
+ 169   1      }
+ 170          
+ 171          static uint8_t RS485_ConfigRegistersAreValid(void)
+ 172          {
+ 173   1          uint32_t baud1;
+ 174   1          uint32_t baud2;
+ 175   1          uint16_t slave_id1;
+ 176   1          uint16_t slave_id2;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 4   
 
- 177   1          baud1 = RS485_ReadConfiguredBaud(SLAVE_PORT1_BAUD_HIGH_OFFSET);
- 178   1          baud2 = RS485_ReadConfiguredBaud(SLAVE_PORT2_BAUD_HIGH_OFFSET);
- 179   1          slave_id1 = slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
- 180   1          slave_id2 = slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
- 181   1      
- 182   1          return (uint8_t)(RS485_BaudIsSupported(baud1) &&
- 183   1              RS485_BaudIsSupported(baud2) &&
- 184   1              slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET] <= RS485_PARITY_ODD &&
- 185   1              slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET] <= RS485_PARITY_ODD &&
- 186   1              slave_id1 >= 1 && slave_id1 <= 247 &&
- 187   1              slave_id2 >= 1 && slave_id2 <= 247);
- 188   1      }
- 189          
- 190          static uint8_t RS485_IsCommunicationConfigOffset(uint16_t offset)
- 191          {
- 192   1          return (uint8_t)(offset >= COMM_CONFIG_FIRST_INDEX &&
- 193   1              offset < (COMM_CONFIG_FIRST_INDEX + COMM_CONFIG_WORD_COUNT));
- 194   1      }
- 195          
- 196          static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
- 197                                                             uint16_t value)
- 198          {
- 199   1          if (offset < ENERGY_METER_REGISTER_COUNT ||
- 200   1              offset >= SLAVE_REGISTER_COUNT)
- 201   1          {
- 202   2              return 0;
- 203   2          }
- 204   1          if (offset >= SLAVE_RELAY_START &&
- 205   1              offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
- 206   1          {
- 207   2              if (value > 1) return 0;
- 208   2              if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0)
- 209   2              {
- 210   3                  return (uint8_t)(value == 1);
- 211   3              }
- 212   2              return (uint8_t)(value == 0 ||
- 213   2                  (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0);
- 214   2          }
- 215   1          if (offset == SLAVE_PORT1_PARITY_OFFSET ||
- 216   1              offset == SLAVE_PORT2_PARITY_OFFSET)
- 217   1          {
- 218   2              return (uint8_t)(value <= RS485_PARITY_ODD);
- 219   2          }
- 220   1          if (offset == SLAVE_PORT1_ID_OFFSET ||
- 221   1              offset == SLAVE_PORT2_ID_OFFSET)
- 222   1          {
- 223   2              return (uint8_t)(value >= 1 && value <= 247);
- 224   2          }
- 225   1          if (offset >= COMPANY_NAME_FIRST_OFFSET &&
- 226   1              offset < (COMPANY_NAME_FIRST_OFFSET + COMPANY_NAME_REGISTER_COUNT))
- 227   1          {
- 228   2              return Prepaid_CompanyRegisterIsValid(value);
- 229   2          }
- 230   1          if (offset == BMS_RELAY_OVERRIDE_OFFSET)
- 231   1          {
- 232   2              return (uint8_t)(value <= 1);
- 233   2          }
- 234   1          if (offset == TAMPER_STATUS_OFFSET ||
- 235   1              offset >= TAMPER_STATUS_OFFSET + 1)
- 236   1          {
- 237   2              return 0;
- 238   2          }
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 5   
+ 177   1      
+ 178   1          baud1 = RS485_ReadConfiguredBaud(SLAVE_PORT1_BAUD_HIGH_OFFSET);
+ 179   1          baud2 = RS485_ReadConfiguredBaud(SLAVE_PORT2_BAUD_HIGH_OFFSET);
+ 180   1          slave_id1 = slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
+ 181   1          slave_id2 = slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
+ 182   1      
+ 183   1          return (uint8_t)(RS485_BaudIsSupported(baud1) &&
+ 184   1              RS485_BaudIsSupported(baud2) &&
+ 185   1              slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET] <= RS485_PARITY_ODD &&
+ 186   1              slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET] <= RS485_PARITY_ODD &&
+ 187   1              slave_id1 >= 1 && slave_id1 <= 247 &&
+ 188   1              slave_id2 >= 1 && slave_id2 <= 247);
+ 189   1      }
+ 190          
+ 191          static uint8_t RS485_IsCommunicationConfigOffset(uint16_t offset)
+ 192          {
+ 193   1          return (uint8_t)(offset >= COMM_CONFIG_FIRST_INDEX &&
+ 194   1              offset < (COMM_CONFIG_FIRST_INDEX + COMM_CONFIG_WORD_COUNT));
+ 195   1      }
+ 196          
+ 197          static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
+ 198                                                             uint16_t value)
+ 199          {
+ 200   1          if (offset < SLAVE_RELAY_START ||
+ 201   1              offset >= SLAVE_REGISTER_COUNT)
+ 202   1          {
+ 203   2              return 0;
+ 204   2          }
+ 205   1          if (offset >= SLAVE_RELAY_START &&
+ 206   1              offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+ 207   1          {
+ 208   2              if (value > 1) return 0;
+ 209   2              if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0)
+ 210   2              {
+ 211   3                  return (uint8_t)(value == 1);
+ 212   3              }
+ 213   2              return (uint8_t)(value == 0 ||
+ 214   2                  (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0);
+ 215   2          }
+ 216   1          if (offset == SLAVE_PORT1_PARITY_OFFSET ||
+ 217   1              offset == SLAVE_PORT2_PARITY_OFFSET)
+ 218   1          {
+ 219   2              return (uint8_t)(value <= RS485_PARITY_ODD);
+ 220   2          }
+ 221   1          if (offset == SLAVE_PORT1_ID_OFFSET ||
+ 222   1              offset == SLAVE_PORT2_ID_OFFSET)
+ 223   1          {
+ 224   2              return (uint8_t)(value >= 1 && value <= 247);
+ 225   2          }
+ 226   1          if (offset >= COMPANY_NAME_FIRST_OFFSET &&
+ 227   1              offset < (COMPANY_NAME_FIRST_OFFSET + COMPANY_NAME_REGISTER_COUNT))
+ 228   1          {
+ 229   2              return Prepaid_CompanyRegisterIsValid(value);
+ 230   2          }
+ 231   1          if (offset == BMS_RELAY_OVERRIDE_OFFSET)
+ 232   1          {
+ 233   2              return (uint8_t)(value <= 1);
+ 234   2          }
+ 235   1          if (offset == TAMPER_STATUS_OFFSET ||
+ 236   1              offset >= TAMPER_STATUS_OFFSET + 1)
+ 237   1          {
+ 238   2              return 0;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 5   
 
- 239   1          if (offset == LOW_BALANCE_ALERT_OFFSET)
- 240   1          {
- 241   2              return 0;
- 242   2          }
- 243   1          return 1;
- 244   1      }
- 245          
- 246          static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
- 247          {
- 248   1          if (offset >= COMPANY_NAME_FIRST_OFFSET &&
- 249   1              offset < (COMPANY_NAME_FIRST_OFFSET + COMPANY_NAME_REGISTER_COUNT))
- 250   1          {
- 251   2              return PREPAID_CHANGE_COMPANY;
- 252   2          }
- 253   1          if (offset == BALANCE_OFFSET)
- 254   1          {
- 255   2              return PREPAID_CHANGE_CREDIT;
- 256   2          }
- 257   1          if (offset == BMS_RELAY_OVERRIDE_OFFSET)
- 258   1          {
- 259   2              return PREPAID_CHANGE_OVERRIDE;
- 260   2          }
- 261   1          if (offset >= SLAVE_RELAY_START &&
- 262   1              offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
- 263   1          {
- 264   2              return PREPAID_CHANGE_LOADS;
- 265   2          }
- 266   1          if (offset >= MAIN_RATE_OFFSET && offset <= SOLAR_RATE_OFFSET)
- 267   1          {
- 268   2              return PREPAID_CHANGE_RATES;
- 269   2          }
- 270   1          if (offset == LOW_BALANCE_THRESHOLD_OFFSET)
- 271   1          {
- 272   2              return PREPAID_CHANGE_THRESHOLD;
- 273   2          }
- 274   1          if (offset == BACKLIGHT_TIMEOUT_OFFSET)
- 275   1          {
- 276   2              return PREPAID_CHANGE_BACKLIGHT;
- 277   2          }
- 278   1          if (offset >= MAIN_CONSUMPTION_OFFSET &&
- 279   1              offset <= SOLAR_CONSUMPTION_OFFSET)
- 280   1          {
- 281   2              return PREPAID_CHANGE_CONSUMPTION;
- 282   2          }
- 283   1          return 0;
- 284   1      }
- 285          
- 286          static void RS485_SendByte(uint8_t port, uint8_t value)
- 287          {
- 288   1          uint8_t parity;
- 289   1      
- 290   1          parity = RS485_ParityBit(value,
- 291   1              (port == 1) ? port1_parity : port2_parity);
- 292   1          SFRS = 0;
- 293   1          if (port == 1)
- 294   1          {
- 295   2              port1_tx_complete = 0;
- 296   2              TB8_1 = parity;
- 297   2              SBUF_1 = value;
- 298   2              while (port1_tx_complete == 0) { }
- 299   2          }
- 300   1          else
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 6   
+ 239   2          }
+ 240   1          if (offset == LOW_BALANCE_ALERT_OFFSET)
+ 241   1          {
+ 242   2              return 0;
+ 243   2          }
+ 244   1          return 1;
+ 245   1      }
+ 246          
+ 247          static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
+ 248          {
+ 249   1          if (offset >= COMPANY_NAME_FIRST_OFFSET &&
+ 250   1              offset < (COMPANY_NAME_FIRST_OFFSET + COMPANY_NAME_REGISTER_COUNT))
+ 251   1          {
+ 252   2              return PREPAID_CHANGE_COMPANY;
+ 253   2          }
+ 254   1          if (offset == BALANCE_OFFSET)
+ 255   1          {
+ 256   2              return PREPAID_CHANGE_CREDIT;
+ 257   2          }
+ 258   1          if (offset == BMS_RELAY_OVERRIDE_OFFSET)
+ 259   1          {
+ 260   2              return PREPAID_CHANGE_OVERRIDE;
+ 261   2          }
+ 262   1          if (offset >= SLAVE_RELAY_START &&
+ 263   1              offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+ 264   1          {
+ 265   2              return PREPAID_CHANGE_LOADS;
+ 266   2          }
+ 267   1          if (offset >= MAIN_RATE_OFFSET && offset <= SOLAR_RATE_OFFSET)
+ 268   1          {
+ 269   2              return PREPAID_CHANGE_RATES;
+ 270   2          }
+ 271   1          if (offset == LOW_BALANCE_THRESHOLD_OFFSET)
+ 272   1          {
+ 273   2              return PREPAID_CHANGE_THRESHOLD;
+ 274   2          }
+ 275   1          if (offset == BACKLIGHT_TIMEOUT_OFFSET)
+ 276   1          {
+ 277   2              return PREPAID_CHANGE_BACKLIGHT;
+ 278   2          }
+ 279   1          if (offset >= MAIN_CONSUMPTION_OFFSET &&
+ 280   1              offset <= SOLAR_CONSUMPTION_OFFSET)
+ 281   1          {
+ 282   2              return PREPAID_CHANGE_CONSUMPTION;
+ 283   2          }
+ 284   1          return 0;
+ 285   1      }
+ 286          
+ 287          static void RS485_SendByte(uint8_t port, uint8_t value)
+ 288          {
+ 289   1          uint8_t parity;
+ 290   1      
+ 291   1          parity = RS485_ParityBit(value,
+ 292   1              (port == 1) ? port1_parity : port2_parity);
+ 293   1          SFRS = 0;
+ 294   1          if (port == 1)
+ 295   1          {
+ 296   2              port1_tx_complete = 0;
+ 297   2              TB8_1 = parity;
+ 298   2              SBUF_1 = value;
+ 299   2              while (port1_tx_complete == 0) { }
+ 300   2          }
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 6   
 
- 301   1          {
- 302   2              port2_tx_complete = 0;
- 303   2              TB8 = parity;
- 304   2              SBUF = value;
- 305   2              while (port2_tx_complete == 0) { }
- 306   2          }
- 307   1      }
- 308          
- 309          static uint16_t Modbus_Crc16(uint8_t xdata *buffer, uint8_t length)
- 310          {
- 311   1          uint8_t index;
- 312   1          uint8_t bit_index;
- 313   1          uint16_t crc;
- 314   1      
- 315   1          crc = 0xFFFF;
- 316   1          for (index = 0; index < length; index++)
- 317   1          {
- 318   2              crc ^= buffer[index];
- 319   2              for (bit_index = 0; bit_index < 8; bit_index++)
- 320   2              {
- 321   3                  if (crc & 1)
- 322   3                  {
- 323   4                      crc >>= 1;
- 324   4                      crc ^= 0xA001;
- 325   4                  }
- 326   3                  else
- 327   3                  {
- 328   4                      crc >>= 1;
- 329   4                  }
- 330   3              }
- 331   2          }
- 332   1      
- 333   1          return crc;
- 334   1      }
- 335          
- 336          static uint8_t MeterEeprom_WaitComplete(void)
- 337          {
- 338   1          uint16_t timeout;
- 339   1      
- 340   1          timeout = 0;
- 341   1          while ((I2CON & I2C_SI) == 0)
- 342   1          {
- 343   2              timeout++;
- 344   2              if (timeout == 0)
- 345   2              {
- 346   3                  return 0;
- 347   3              }
- 348   2          }
- 349   1          return 1;
- 350   1      }
- 351          
- 352          static uint8_t MeterEeprom_Start(void)
- 353          {
- 354   1          I2CON |= I2C_STA;
- 355   1          I2CON &= (uint8_t)~I2C_SI;
- 356   1          if (!MeterEeprom_WaitComplete()) return 0;
- 357   1          if (I2STAT != 0x08 && I2STAT != 0x10) return 0;
- 358   1          I2CON &= (uint8_t)~I2C_STA;
- 359   1          return 1;
- 360   1      }
- 361          
- 362          static uint8_t MeterEeprom_WriteI2cByte(uint8_t value, uint8_t expected_status)
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 7   
+ 301   1          else
+ 302   1          {
+ 303   2              port2_tx_complete = 0;
+ 304   2              TB8 = parity;
+ 305   2              SBUF = value;
+ 306   2              while (port2_tx_complete == 0) { }
+ 307   2          }
+ 308   1      }
+ 309          
+ 310          static uint16_t Modbus_Crc16(uint8_t xdata *buffer, uint8_t length)
+ 311          {
+ 312   1          uint8_t index;
+ 313   1          uint8_t bit_index;
+ 314   1          uint16_t crc;
+ 315   1      
+ 316   1          crc = 0xFFFF;
+ 317   1          for (index = 0; index < length; index++)
+ 318   1          {
+ 319   2              crc ^= buffer[index];
+ 320   2              for (bit_index = 0; bit_index < 8; bit_index++)
+ 321   2              {
+ 322   3                  if (crc & 1)
+ 323   3                  {
+ 324   4                      crc >>= 1;
+ 325   4                      crc ^= 0xA001;
+ 326   4                  }
+ 327   3                  else
+ 328   3                  {
+ 329   4                      crc >>= 1;
+ 330   4                  }
+ 331   3              }
+ 332   2          }
+ 333   1      
+ 334   1          return crc;
+ 335   1      }
+ 336          
+ 337          static uint8_t MeterEeprom_WaitComplete(void)
+ 338          {
+ 339   1          uint16_t timeout;
+ 340   1      
+ 341   1          timeout = 0;
+ 342   1          while ((I2CON & I2C_SI) == 0)
+ 343   1          {
+ 344   2              timeout++;
+ 345   2              if (timeout == 0)
+ 346   2              {
+ 347   3                  return 0;
+ 348   3              }
+ 349   2          }
+ 350   1          return 1;
+ 351   1      }
+ 352          
+ 353          static uint8_t MeterEeprom_Start(void)
+ 354          {
+ 355   1          I2CON |= I2C_STA;
+ 356   1          I2CON &= (uint8_t)~I2C_SI;
+ 357   1          if (!MeterEeprom_WaitComplete()) return 0;
+ 358   1          if (I2STAT != 0x08 && I2STAT != 0x10) return 0;
+ 359   1          I2CON &= (uint8_t)~I2C_STA;
+ 360   1          return 1;
+ 361   1      }
+ 362          
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 7   
 
- 363          {
- 364   1          I2DAT = value;
- 365   1          I2CON &= (uint8_t)~I2C_SI;
- 366   1          if (!MeterEeprom_WaitComplete()) return 0;
- 367   1          return (uint8_t)(I2STAT == expected_status);
- 368   1      }
- 369          
- 370          static uint8_t MeterEeprom_ReadI2cByte(uint8_t acknowledge, uint8_t *value)
- 371          {
- 372   1          if (acknowledge) I2CON |= 0x04;
- 373   1          else I2CON &= (uint8_t)~0x04;
- 374   1          I2CON &= (uint8_t)~I2C_SI;
- 375   1          if (!MeterEeprom_WaitComplete()) return 0;
- 376   1          if (acknowledge && I2STAT != 0x50) return 0;
- 377   1          if (!acknowledge && I2STAT != 0x58) return 0;
- 378   1          *value = I2DAT;
- 379   1          return 1;
- 380   1      }
- 381          
- 382          static void MeterEeprom_Stop(void)
- 383          {
- 384   1          I2CON |= I2C_STO;
- 385   1          I2CON &= (uint8_t)~I2C_SI;
- 386   1      }
- 387          
- 388          static uint8_t MeterEeprom_Probe(void)
- 389          {
- 390   1          uint8_t result;
- 391   1      
- 392   1          result = 0;
- 393   1          if (MeterEeprom_Start())
- 394   1          {
- 395   2              result = MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18);
- 396   2          }
- 397   1          MeterEeprom_Stop();
- 398   1          return result;
- 399   1      }
- 400          
- 401          static void MeterEeprom_Init(void)
- 402          {
- 403   1          SFRS = 0;
- 404   1          P13_OPENDRAIN_MODE;
- 405   1          P14_OPENDRAIN_MODE;
- 406   1          P1 |= 0x18;
- 407   1          I2CLK = 59;
- 408   1          I2CON = I2C_ENABLE;
- 409   1      }
- 410          
- 411          static uint8_t MeterEeprom_ReadRecord(void)
- 412          {
- 413   1          uint8_t index;
- 414   1      
- 415   1          if (!MeterEeprom_Start()) goto error;
- 416   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
- 417   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_OFFSET >> 8), 0x28)) goto error;
- 418   1          if (!MeterEeprom_WriteI2cByte((uint8_t)METER_EEPROM_OFFSET, 0x28)) goto error;
- 419   1          if (!MeterEeprom_Start()) goto error;
- 420   1          if (!MeterEeprom_WriteI2cByte((uint8_t)((METER_EEPROM_ADDRESS << 1) | 1), 0x40)) goto error;
- 421   1          for (index = 0; index < METER_EEPROM_RECORD_SIZE; index++)
- 422   1          {
- 423   2              if (!MeterEeprom_ReadI2cByte(index + 1 < METER_EEPROM_RECORD_SIZE,
- 424   2                                           &meter_eeprom_record[index])) goto error;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 8   
+ 363          static uint8_t MeterEeprom_WriteI2cByte(uint8_t value, uint8_t expected_status)
+ 364          {
+ 365   1          I2DAT = value;
+ 366   1          I2CON &= (uint8_t)~I2C_SI;
+ 367   1          if (!MeterEeprom_WaitComplete()) return 0;
+ 368   1          return (uint8_t)(I2STAT == expected_status);
+ 369   1      }
+ 370          
+ 371          static uint8_t MeterEeprom_ReadI2cByte(uint8_t acknowledge, uint8_t *value)
+ 372          {
+ 373   1          if (acknowledge) I2CON |= 0x04;
+ 374   1          else I2CON &= (uint8_t)~0x04;
+ 375   1          I2CON &= (uint8_t)~I2C_SI;
+ 376   1          if (!MeterEeprom_WaitComplete()) return 0;
+ 377   1          if (acknowledge && I2STAT != 0x50) return 0;
+ 378   1          if (!acknowledge && I2STAT != 0x58) return 0;
+ 379   1          *value = I2DAT;
+ 380   1          return 1;
+ 381   1      }
+ 382          
+ 383          static void MeterEeprom_Stop(void)
+ 384          {
+ 385   1          I2CON |= I2C_STO;
+ 386   1          I2CON &= (uint8_t)~I2C_SI;
+ 387   1      }
+ 388          
+ 389          static uint8_t MeterEeprom_Probe(void)
+ 390          {
+ 391   1          uint8_t result;
+ 392   1      
+ 393   1          result = 0;
+ 394   1          if (MeterEeprom_Start())
+ 395   1          {
+ 396   2              result = MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18);
+ 397   2          }
+ 398   1          MeterEeprom_Stop();
+ 399   1          return result;
+ 400   1      }
+ 401          
+ 402          static void MeterEeprom_Init(void)
+ 403          {
+ 404   1          SFRS = 0;
+ 405   1          P13_OPENDRAIN_MODE;
+ 406   1          P14_OPENDRAIN_MODE;
+ 407   1          P1 |= 0x18;
+ 408   1          I2CLK = 59;
+ 409   1          I2CON = I2C_ENABLE;
+ 410   1      }
+ 411          
+ 412          static uint8_t MeterEeprom_ReadRecord(void)
+ 413          {
+ 414   1          uint8_t index;
+ 415   1      
+ 416   1          if (!MeterEeprom_Start()) goto error;
+ 417   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
+ 418   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_OFFSET >> 8), 0x28)) goto error;
+ 419   1          if (!MeterEeprom_WriteI2cByte((uint8_t)METER_EEPROM_OFFSET, 0x28)) goto error;
+ 420   1          if (!MeterEeprom_Start()) goto error;
+ 421   1          if (!MeterEeprom_WriteI2cByte((uint8_t)((METER_EEPROM_ADDRESS << 1) | 1), 0x40)) goto error;
+ 422   1          for (index = 0; index < METER_EEPROM_RECORD_SIZE; index++)
+ 423   1          {
+ 424   2              if (!MeterEeprom_ReadI2cByte(index + 1 < METER_EEPROM_RECORD_SIZE,
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 8   
 
- 425   2          }
- 426   1          MeterEeprom_Stop();
- 427   1          return 1;
- 428   1      
- 429   1      error:
- 430   1          MeterEeprom_Stop();
- 431   1          return 0;
- 432   1      }
- 433          
- 434          static uint8_t MeterEeprom_WriteRecord(void)
- 435          {
- 436   1          uint8_t index;
- 437   1      
- 438   1          for (index = 0; index < METER_EEPROM_RECORD_SIZE; index++)
- 439   1          {
- 440   2              if (!MeterEeprom_Start()) goto error;
- 441   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
- 442   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_OFFSET >> 8), 0x28)) goto error;
- 443   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_OFFSET + index), 0x28)) goto error;
- 444   2              if (!MeterEeprom_WriteI2cByte(meter_eeprom_record[index], 0x28)) goto error;
- 445   2              MeterEeprom_Stop();
- 446   2              Board_DelayMs(5);
- 447   2          }
- 448   1          return 1;
- 449   1      
- 450   1      error:
- 451   1          MeterEeprom_Stop();
- 452   1          return 0;
- 453   1      }
- 454          
- 455          static void MeterEeprom_BuildRecord(void)
- 456          {
- 457   1          uint8_t index;
- 458   1          uint16_t crc;
- 459   1      
- 460   1          meter_eeprom_record[0] = 0x4D;
- 461   1          meter_eeprom_record[1] = 0x52;
- 462   1          meter_eeprom_record[2] = 1;
- 463   1          meter_eeprom_record[3] = METER_REGISTER_COUNT;
- 464   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
- 465   1          {
- 466   2              meter_eeprom_record[4 + index * 2] = (uint8_t)(s_energy_meter_registers[index] >> 8);
- 467   2              meter_eeprom_record[5 + index * 2] = (uint8_t)s_energy_meter_registers[index];
- 468   2          }
- 469   1          crc = Modbus_Crc16(meter_eeprom_record, 12);
- 470   1          meter_eeprom_record[12] = (uint8_t)crc;
- 471   1          meter_eeprom_record[13] = (uint8_t)(crc >> 8);
- 472   1      }
- 473          
- 474          static void MeterEeprom_Load(void)
- 475          {
- 476   1          uint8_t index;
- 477   1          uint16_t crc;
- 478   1      
- 479   1          meter_eeprom_present = MeterEeprom_Probe();
- 480   1          if (!meter_eeprom_present) return;
- 481   1          if (!MeterEeprom_ReadRecord())
- 482   1          {
- 483   2              meter_eeprom_last_error = 1;
- 484   2              return;
- 485   2          }
- 486   1          crc = Modbus_Crc16(meter_eeprom_record, 12);
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 9   
+ 425   2                                           &meter_eeprom_record[index])) goto error;
+ 426   2          }
+ 427   1          MeterEeprom_Stop();
+ 428   1          return 1;
+ 429   1      
+ 430   1      error:
+ 431   1          MeterEeprom_Stop();
+ 432   1          return 0;
+ 433   1      }
+ 434          
+ 435          static uint8_t MeterEeprom_WriteRecord(void)
+ 436          {
+ 437   1          uint8_t index;
+ 438   1          uint8_t page_index;
+ 439   1          uint8_t page_length;
+ 440   1          uint16_t eeprom_address;
+ 441   1      
+ 442   1          index = 0;
+ 443   1          while (index < METER_EEPROM_RECORD_SIZE)
+ 444   1          {
+ 445   2              eeprom_address = METER_EEPROM_OFFSET + index;
+ 446   2              page_length = (uint8_t)(METER_EEPROM_PAGE_SIZE -
+ 447   2                  (eeprom_address % METER_EEPROM_PAGE_SIZE));
+ 448   2              if (page_length > (METER_EEPROM_RECORD_SIZE - index))
+ 449   2              {
+ 450   3                  page_length = (uint8_t)(METER_EEPROM_RECORD_SIZE - index);
+ 451   3              }
+ 452   2      
+ 453   2              if (!MeterEeprom_Start()) goto error;
+ 454   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
+ 455   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(eeprom_address >> 8), 0x28)) goto error;
+ 456   2              if (!MeterEeprom_WriteI2cByte((uint8_t)eeprom_address, 0x28)) goto error;
+ 457   2              for (page_index = 0; page_index < page_length; page_index++)
+ 458   2              {
+ 459   3                  if (!MeterEeprom_WriteI2cByte(
+ 460   3                          meter_eeprom_record[index + page_index], 0x28)) goto error;
+ 461   3              }
+ 462   2              MeterEeprom_Stop();
+ 463   2              Board_DelayMs(5);
+ 464   2              index = (uint8_t)(index + page_length);
+ 465   2          }
+ 466   1          return 1;
+ 467   1      
+ 468   1      error:
+ 469   1          MeterEeprom_Stop();
+ 470   1          return 0;
+ 471   1      }
+ 472          
+ 473          static void MeterEeprom_BuildRecord(void)
+ 474          {
+ 475   1          uint8_t index;
+ 476   1          uint16_t crc;
+ 477   1      
+ 478   1          meter_eeprom_record[0] = 0x4D;
+ 479   1          meter_eeprom_record[1] = 0x52;
+ 480   1          meter_eeprom_record[2] = 1;
+ 481   1          meter_eeprom_record[3] = METER_REGISTER_COUNT;
+ 482   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+ 483   1          {
+ 484   2              meter_eeprom_record[4 + index * 2] = (uint8_t)(s_energy_meter_registers[index] >> 8);
+ 485   2              meter_eeprom_record[5 + index * 2] = (uint8_t)s_energy_meter_registers[index];
+ 486   2          }
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 9   
 
- 487   1          if (meter_eeprom_record[0] != 0x4D || meter_eeprom_record[1] != 0x52 ||
- 488   1              meter_eeprom_record[2] != 1 || meter_eeprom_record[3] != METER_REGISTER_COUNT ||
- 489   1              meter_eeprom_record[12] != (uint8_t)crc ||
- 490   1              meter_eeprom_record[13] != (uint8_t)(crc >> 8))
- 491   1          {
- 492   2              meter_eeprom_last_error = 2;
- 493   2              return;
- 494   2          }
- 495   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
- 496   1          {
- 497   2              s_energy_meter_registers[index] =
- 498   2                  ((uint16_t)meter_eeprom_record[4 + index * 2] << 8) |
- 499   2                  meter_eeprom_record[5 + index * 2];
- 500   2              energy_meter_registers[index] = s_energy_meter_registers[index];
- 501   2              slave_holding_registers[index] = s_energy_meter_registers[index];
- 502   2              meter_eeprom_last_saved[index] = s_energy_meter_registers[index];
+ 487   1          crc = Modbus_Crc16(meter_eeprom_record, METER_EEPROM_RECORD_SIZE - 2);
+ 488   1          meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 2] = (uint8_t)crc;
+ 489   1          meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
+ 490   1      }
+ 491          
+ 492          static void MeterEeprom_Load(void)
+ 493          {
+ 494   1          uint8_t index;
+ 495   1          uint16_t crc;
+ 496   1      
+ 497   1          meter_eeprom_present = MeterEeprom_Probe();
+ 498   1          if (!meter_eeprom_present) return;
+ 499   1          if (!MeterEeprom_ReadRecord())
+ 500   1          {
+ 501   2              meter_eeprom_last_error = 1;
+ 502   2              return;
  503   2          }
- 504   1          meter_eeprom_has_saved_record = 1;
- 505   1          meter_eeprom_loaded = 1;
- 506   1      }
- 507          
- 508          static void RS485_SetDefaultCommunicationRegisters(void)
- 509          {
- 510   1          slave_holding_registers[SLAVE_PORT1_BAUD_HIGH_OFFSET] = 0;
- 511   1          slave_holding_registers[SLAVE_PORT1_BAUD_LOW_OFFSET] =
- 512   1              (uint16_t)DEFAULT_RS485_BAUD;
- 513   1          slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET] = DEFAULT_RS485_PARITY;
- 514   1          slave_holding_registers[SLAVE_PORT1_ID_OFFSET] = DEFAULT_CONTROLLER_ID;
- 515   1          slave_holding_registers[SLAVE_PORT2_BAUD_HIGH_OFFSET] = 0;
- 516   1          slave_holding_registers[SLAVE_PORT2_BAUD_LOW_OFFSET] =
- 517   1              (uint16_t)DEFAULT_RS485_BAUD;
- 518   1          slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET] = DEFAULT_RS485_PARITY;
- 519   1          slave_holding_registers[SLAVE_PORT2_ID_OFFSET] = DEFAULT_METER_SLAVE_ID;
- 520   1      }
- 521          
- 522          static uint8_t CommConfig_ReadRecord(void)
- 523          {
- 524   1          uint8_t index;
- 525   1      
- 526   1          if (!MeterEeprom_Start()) goto error;
- 527   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
- 528   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(COMM_CONFIG_EEPROM_OFFSET >> 8), 0x28)) goto error;
- 529   1          if (!MeterEeprom_WriteI2cByte((uint8_t)COMM_CONFIG_EEPROM_OFFSET, 0x28)) goto error;
- 530   1          if (!MeterEeprom_Start()) goto error;
- 531   1          if (!MeterEeprom_WriteI2cByte((uint8_t)((METER_EEPROM_ADDRESS << 1) | 1), 0x40)) goto error;
- 532   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
- 533   1          {
- 534   2              if (!MeterEeprom_ReadI2cByte(index + 1 < COMM_CONFIG_RECORD_SIZE,
- 535   2                                           &comm_config_record[index])) goto error;
- 536   2          }
- 537   1          MeterEeprom_Stop();
- 538   1          return 1;
- 539   1      
- 540   1      error:
- 541   1          MeterEeprom_Stop();
- 542   1          return 0;
- 543   1      }
- 544          
- 545          static uint8_t CommConfig_WriteRecord(void)
- 546          {
- 547   1          uint8_t index;
- 548   1      
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 10  
+ 504   1          crc = Modbus_Crc16(meter_eeprom_record, METER_EEPROM_RECORD_SIZE - 2);
+ 505   1          if (meter_eeprom_record[0] != 0x4D || meter_eeprom_record[1] != 0x52 ||
+ 506   1              meter_eeprom_record[2] != 1 || meter_eeprom_record[3] != METER_REGISTER_COUNT ||
+ 507   1              meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 2] != (uint8_t)crc ||
+ 508   1              meter_eeprom_record[METER_EEPROM_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
+ 509   1          {
+ 510   2              meter_eeprom_last_error = 2;
+ 511   2              return;
+ 512   2          }
+ 513   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+ 514   1          {
+ 515   2              s_energy_meter_registers[index] =
+ 516   2                  ((uint16_t)meter_eeprom_record[4 + index * 2] << 8) |
+ 517   2                  meter_eeprom_record[5 + index * 2];
+ 518   2              energy_meter_registers[index] = s_energy_meter_registers[index];
+ 519   2              meter_eeprom_last_saved[index] = s_energy_meter_registers[index];
+ 520   2          }
+ 521   1          meter_eeprom_has_saved_record = 1;
+ 522   1          meter_eeprom_loaded = 1;
+ 523   1      }
+ 524          
+ 525          static void RS485_SetDefaultCommunicationRegisters(void)
+ 526          {
+ 527   1          slave_holding_registers[SLAVE_PORT1_BAUD_HIGH_OFFSET] = 0;
+ 528   1          slave_holding_registers[SLAVE_PORT1_BAUD_LOW_OFFSET] =
+ 529   1              (uint16_t)DEFAULT_RS485_BAUD;
+ 530   1          slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET] = DEFAULT_RS485_PARITY;
+ 531   1          slave_holding_registers[SLAVE_PORT1_ID_OFFSET] = DEFAULT_CONTROLLER_ID;
+ 532   1          slave_holding_registers[SLAVE_PORT2_BAUD_HIGH_OFFSET] = 0;
+ 533   1          slave_holding_registers[SLAVE_PORT2_BAUD_LOW_OFFSET] =
+ 534   1              (uint16_t)DEFAULT_RS485_BAUD;
+ 535   1          slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET] = DEFAULT_RS485_PARITY;
+ 536   1          slave_holding_registers[SLAVE_PORT2_ID_OFFSET] = DEFAULT_METER_SLAVE_ID;
+ 537   1      }
+ 538          
+ 539          static uint8_t CommConfig_ReadRecord(void)
+ 540          {
+ 541   1          uint8_t index;
+ 542   1      
+ 543   1          if (!MeterEeprom_Start()) goto error;
+ 544   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
+ 545   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(COMM_CONFIG_EEPROM_OFFSET >> 8), 0x28)) goto error;
+ 546   1          if (!MeterEeprom_WriteI2cByte((uint8_t)COMM_CONFIG_EEPROM_OFFSET, 0x28)) goto error;
+ 547   1          if (!MeterEeprom_Start()) goto error;
+ 548   1          if (!MeterEeprom_WriteI2cByte((uint8_t)((METER_EEPROM_ADDRESS << 1) | 1), 0x40)) goto error;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 10  
 
  549   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
  550   1          {
- 551   2              if (!MeterEeprom_Start()) goto error;
- 552   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
- 553   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(COMM_CONFIG_EEPROM_OFFSET >> 8), 0x28)) goto error;
- 554   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(COMM_CONFIG_EEPROM_OFFSET + index), 0x28)) goto error;
- 555   2              if (!MeterEeprom_WriteI2cByte(comm_config_record[index], 0x28)) goto error;
- 556   2              MeterEeprom_Stop();
- 557   2              Board_DelayMs(5);
- 558   2          }
- 559   1          return 1;
- 560   1      
- 561   1      error:
- 562   1          MeterEeprom_Stop();
- 563   1          return 0;
- 564   1      }
- 565          
- 566          static void CommConfig_BuildRecord(void)
- 567          {
- 568   1          uint8_t index;
- 569   1          uint16_t value;
- 570   1          uint16_t crc;
- 571   1      
- 572   1          comm_config_record[0] = 0x43;
- 573   1          comm_config_record[1] = 0x46;
- 574   1          comm_config_record[2] = 1;
- 575   1          for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
- 576   1          {
- 577   2              value = slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index];
- 578   2              comm_config_record[3 + index * 2] = (uint8_t)(value >> 8);
- 579   2              comm_config_record[4 + index * 2] = (uint8_t)value;
- 580   2          }
- 581   1          crc = Modbus_Crc16(comm_config_record, COMM_CONFIG_RECORD_SIZE - 2);
- 582   1          comm_config_record[COMM_CONFIG_RECORD_SIZE - 2] = (uint8_t)crc;
- 583   1          comm_config_record[COMM_CONFIG_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
- 584   1      }
- 585          
- 586          static void CommConfig_Load(void)
- 587          {
- 588   1          uint8_t index;
- 589   1          uint16_t crc;
- 590   1      
- 591   1          if (!meter_eeprom_present || !CommConfig_ReadRecord()) return;
- 592   1          crc = Modbus_Crc16(comm_config_record, COMM_CONFIG_RECORD_SIZE - 2);
- 593   1          if (comm_config_record[0] != 0x43 || comm_config_record[1] != 0x46 ||
- 594   1              comm_config_record[2] != 1 ||
- 595   1              comm_config_record[COMM_CONFIG_RECORD_SIZE - 2] != (uint8_t)crc ||
- 596   1              comm_config_record[COMM_CONFIG_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
- 597   1          {
- 598   2              return;
- 599   2          }
- 600   1          for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
- 601   1          {
- 602   2              slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index] =
- 603   2                  ((uint16_t)comm_config_record[3 + index * 2] << 8) |
- 604   2                  comm_config_record[4 + index * 2];
- 605   2          }
- 606   1          if (!RS485_ConfigRegistersAreValid())
- 607   1          {
- 608   2              RS485_SetDefaultCommunicationRegisters();
- 609   2          }
- 610   1      }
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 11  
+ 551   2              if (!MeterEeprom_ReadI2cByte(index + 1 < COMM_CONFIG_RECORD_SIZE,
+ 552   2                                           &comm_config_record[index])) goto error;
+ 553   2          }
+ 554   1          MeterEeprom_Stop();
+ 555   1          return 1;
+ 556   1      
+ 557   1      error:
+ 558   1          MeterEeprom_Stop();
+ 559   1          return 0;
+ 560   1      }
+ 561          
+ 562          static uint8_t CommConfig_WriteRecord(void)
+ 563          {
+ 564   1          uint8_t index;
+ 565   1      
+ 566   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
+ 567   1          {
+ 568   2              if (!MeterEeprom_Start()) goto error;
+ 569   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
+ 570   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(COMM_CONFIG_EEPROM_OFFSET >> 8), 0x28)) goto error;
+ 571   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(COMM_CONFIG_EEPROM_OFFSET + index), 0x28)) goto error;
+ 572   2              if (!MeterEeprom_WriteI2cByte(comm_config_record[index], 0x28)) goto error;
+ 573   2              MeterEeprom_Stop();
+ 574   2              Board_DelayMs(5);
+ 575   2          }
+ 576   1          return 1;
+ 577   1      
+ 578   1      error:
+ 579   1          MeterEeprom_Stop();
+ 580   1          return 0;
+ 581   1      }
+ 582          
+ 583          static void CommConfig_BuildRecord(void)
+ 584          {
+ 585   1          uint8_t index;
+ 586   1          uint16_t value;
+ 587   1          uint16_t crc;
+ 588   1      
+ 589   1          comm_config_record[0] = 0x43;
+ 590   1          comm_config_record[1] = 0x46;
+ 591   1          comm_config_record[2] = 1;
+ 592   1          for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
+ 593   1          {
+ 594   2              value = slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index];
+ 595   2              comm_config_record[3 + index * 2] = (uint8_t)(value >> 8);
+ 596   2              comm_config_record[4 + index * 2] = (uint8_t)value;
+ 597   2          }
+ 598   1          crc = Modbus_Crc16(comm_config_record, COMM_CONFIG_RECORD_SIZE - 2);
+ 599   1          comm_config_record[COMM_CONFIG_RECORD_SIZE - 2] = (uint8_t)crc;
+ 600   1          comm_config_record[COMM_CONFIG_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
+ 601   1      }
+ 602          
+ 603          static void CommConfig_Load(void)
+ 604          {
+ 605   1          uint8_t index;
+ 606   1          uint16_t crc;
+ 607   1      
+ 608   1          if (!meter_eeprom_present || !CommConfig_ReadRecord()) return;
+ 609   1          crc = Modbus_Crc16(comm_config_record, COMM_CONFIG_RECORD_SIZE - 2);
+ 610   1          if (comm_config_record[0] != 0x43 || comm_config_record[1] != 0x46 ||
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 11  
 
- 611          
- 612          static uint8_t CommConfig_Save(void)
- 613          {
- 614   1          uint8_t index;
- 615   1      
- 616   1          if (!meter_eeprom_present || !RS485_ConfigRegistersAreValid()) return 0;
- 617   1          CommConfig_BuildRecord();
- 618   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
- 619   1          {
- 620   2              comm_config_verify[index] = comm_config_record[index];
- 621   2          }
- 622   1          if (!CommConfig_WriteRecord() || !CommConfig_ReadRecord()) return 0;
- 623   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
+ 611   1              comm_config_record[2] != 1 ||
+ 612   1              comm_config_record[COMM_CONFIG_RECORD_SIZE - 2] != (uint8_t)crc ||
+ 613   1              comm_config_record[COMM_CONFIG_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
+ 614   1          {
+ 615   2              return;
+ 616   2          }
+ 617   1          for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
+ 618   1          {
+ 619   2              slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index] =
+ 620   2                  ((uint16_t)comm_config_record[3 + index * 2] << 8) |
+ 621   2                  comm_config_record[4 + index * 2];
+ 622   2          }
+ 623   1          if (!RS485_ConfigRegistersAreValid())
  624   1          {
- 625   2              if (comm_config_record[index] != comm_config_verify[index]) return 0;
+ 625   2              RS485_SetDefaultCommunicationRegisters();
  626   2          }
- 627   1          return 1;
- 628   1      }
- 629          
- 630          static uint8_t Prepaid_CompanyRegisterIsValid(uint16_t value)
- 631          {
- 632   1          uint8_t high_byte;
- 633   1          uint8_t low_byte;
- 634   1      
- 635   1          high_byte = (uint8_t)(value >> 8);
- 636   1          low_byte = (uint8_t)value;
- 637   1          return (uint8_t)((high_byte == 0 || (high_byte >= 32 && high_byte <= 126)) &&
- 638   1              (low_byte == 0 || (low_byte >= 32 && low_byte <= 126)));
- 639   1      }
- 640          
- 641          static uint32_t Prepaid_ReadRecordU32(uint8_t offset)
- 642          {
- 643   1          return (((uint32_t)prepaid_eeprom_record[offset] << 24) |
- 644   1              ((uint32_t)prepaid_eeprom_record[offset + 1] << 16) |
- 645   1              ((uint32_t)prepaid_eeprom_record[offset + 2] << 8) |
- 646   1              prepaid_eeprom_record[offset + 3]);
- 647   1      }
- 648          
- 649          static uint8_t PrepaidEeprom_ReadRecord(void)
- 650          {
- 651   1          uint8_t index;
- 652   1      
- 653   1          if (!MeterEeprom_Start()) goto error;
- 654   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
- 655   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(PREPAID_EEPROM_OFFSET >> 8), 0x28)) goto error;
- 656   1          if (!MeterEeprom_WriteI2cByte((uint8_t)PREPAID_EEPROM_OFFSET, 0x28)) goto error;
- 657   1          if (!MeterEeprom_Start()) goto error;
- 658   1          if (!MeterEeprom_WriteI2cByte((uint8_t)((METER_EEPROM_ADDRESS << 1) | 1), 0x40)) goto error;
- 659   1          for (index = 0; index < PREPAID_RECORD_SIZE; index++)
- 660   1          {
- 661   2              if (!MeterEeprom_ReadI2cByte(index + 1 < PREPAID_RECORD_SIZE,
- 662   2                                           &prepaid_eeprom_record[index])) goto error;
- 663   2          }
- 664   1          MeterEeprom_Stop();
- 665   1          return 1;
- 666   1      
- 667   1      error:
- 668   1          MeterEeprom_Stop();
- 669   1          return 0;
- 670   1      }
- 671          
- 672          static uint8_t PrepaidEeprom_WriteRecord(void)
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 12  
+ 627   1      }
+ 628          
+ 629          static uint8_t CommConfig_Save(void)
+ 630          {
+ 631   1          uint8_t index;
+ 632   1      
+ 633   1          if (!meter_eeprom_present || !RS485_ConfigRegistersAreValid()) return 0;
+ 634   1          CommConfig_BuildRecord();
+ 635   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
+ 636   1          {
+ 637   2              comm_config_verify[index] = comm_config_record[index];
+ 638   2          }
+ 639   1          if (!CommConfig_WriteRecord() || !CommConfig_ReadRecord()) return 0;
+ 640   1          for (index = 0; index < COMM_CONFIG_RECORD_SIZE; index++)
+ 641   1          {
+ 642   2              if (comm_config_record[index] != comm_config_verify[index]) return 0;
+ 643   2          }
+ 644   1          return 1;
+ 645   1      }
+ 646          
+ 647          static uint8_t Prepaid_CompanyRegisterIsValid(uint16_t value)
+ 648          {
+ 649   1          uint8_t high_byte;
+ 650   1          uint8_t low_byte;
+ 651   1      
+ 652   1          high_byte = (uint8_t)(value >> 8);
+ 653   1          low_byte = (uint8_t)value;
+ 654   1          return (uint8_t)((high_byte == 0 || (high_byte >= 32 && high_byte <= 126)) &&
+ 655   1              (low_byte == 0 || (low_byte >= 32 && low_byte <= 126)));
+ 656   1      }
+ 657          
+ 658          static uint32_t Prepaid_ReadRecordU32(uint8_t offset)
+ 659          {
+ 660   1          return (((uint32_t)prepaid_eeprom_record[offset] << 24) |
+ 661   1              ((uint32_t)prepaid_eeprom_record[offset + 1] << 16) |
+ 662   1              ((uint32_t)prepaid_eeprom_record[offset + 2] << 8) |
+ 663   1              prepaid_eeprom_record[offset + 3]);
+ 664   1      }
+ 665          
+ 666          static uint8_t PrepaidEeprom_ReadRecord(void)
+ 667          {
+ 668   1          uint8_t index;
+ 669   1      
+ 670   1          if (!MeterEeprom_Start()) goto error;
+ 671   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
+ 672   1          if (!MeterEeprom_WriteI2cByte((uint8_t)(PREPAID_EEPROM_OFFSET >> 8), 0x28)) goto error;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 12  
 
- 673          {
- 674   1          uint8_t index;
- 675   1          uint8_t page_count;
- 676   1          uint8_t page_index;
- 677   1          uint16_t address;
- 678   1      
- 679   1          index = 0;
- 680   1          while (index < PREPAID_RECORD_SIZE)
- 681   1          {
- 682   2              address = (uint16_t)(PREPAID_EEPROM_OFFSET + index);
- 683   2              page_count = (uint8_t)(32 - (address & 0x1F));
- 684   2              if (page_count > (PREPAID_RECORD_SIZE - index))
- 685   2              {
- 686   3                  page_count = (uint8_t)(PREPAID_RECORD_SIZE - index);
- 687   3              }
- 688   2              if (!MeterEeprom_Start()) goto error;
- 689   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
- 690   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(address >> 8), 0x28)) goto error;
- 691   2              if (!MeterEeprom_WriteI2cByte((uint8_t)address, 0x28)) goto error;
- 692   2              for (page_index = 0; page_index < page_count; page_index++)
- 693   2              {
- 694   3                  if (!MeterEeprom_WriteI2cByte(
- 695   3                          prepaid_eeprom_record[index + page_index], 0x28)) goto error;
- 696   3              }
- 697   2              MeterEeprom_Stop();
- 698   2              Board_DelayMs(5);
- 699   2              index = (uint8_t)(index + page_count);
- 700   2          }
- 701   1          return 1;
- 702   1      
- 703   1      error:
- 704   1          MeterEeprom_Stop();
- 705   1          return 0;
- 706   1      }
- 707          
- 708          static void Prepaid_SetBalance(int32_t balance)
- 709          {
- 710   1          uint16_t threshold;
- 711   1      
- 712   1          threshold = slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET];
- 713   1          slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] = (balance < 0 ||
- 714   1              ((uint32_t)balance <= (uint32_t)threshold)) ? 1 : 0;
- 715   1          if (balance > 32767L)
- 716   1          {
- 717   2              balance = 32767L;
- 718   2          }
- 719   1          else if (balance < -32768L)
- 720   1          {
- 721   2              balance = -32768L;
- 722   2          }
- 723   1          slave_holding_registers[BALANCE_OFFSET] = (uint16_t)(int16_t)balance;
- 724   1      }
- 725          
- 726          static int32_t Prepaid_SubtractConsumptionCost(int32_t balance,
- 727                                                         uint16_t consumption,
- 728                                                         uint16_t rate)
- 729          {
- 730   1          uint32_t cost;
- 731   1          uint32_t deficit;
- 732   1      
- 733   1          cost = (uint32_t)consumption * (uint32_t)rate;
- 734   1          if (balance >= 0)
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 13  
+ 673   1          if (!MeterEeprom_WriteI2cByte((uint8_t)PREPAID_EEPROM_OFFSET, 0x28)) goto error;
+ 674   1          if (!MeterEeprom_Start()) goto error;
+ 675   1          if (!MeterEeprom_WriteI2cByte((uint8_t)((METER_EEPROM_ADDRESS << 1) | 1), 0x40)) goto error;
+ 676   1          for (index = 0; index < PREPAID_RECORD_SIZE; index++)
+ 677   1          {
+ 678   2              if (!MeterEeprom_ReadI2cByte(index + 1 < PREPAID_RECORD_SIZE,
+ 679   2                                           &prepaid_eeprom_record[index])) goto error;
+ 680   2          }
+ 681   1          MeterEeprom_Stop();
+ 682   1          return 1;
+ 683   1      
+ 684   1      error:
+ 685   1          MeterEeprom_Stop();
+ 686   1          return 0;
+ 687   1      }
+ 688          
+ 689          static uint8_t PrepaidEeprom_WriteRecord(void)
+ 690          {
+ 691   1          uint8_t index;
+ 692   1          uint8_t page_count;
+ 693   1          uint8_t page_index;
+ 694   1          uint16_t address;
+ 695   1      
+ 696   1          index = 0;
+ 697   1          while (index < PREPAID_RECORD_SIZE)
+ 698   1          {
+ 699   2              address = (uint16_t)(PREPAID_EEPROM_OFFSET + index);
+ 700   2              page_count = (uint8_t)(32 - (address & 0x1F));
+ 701   2              if (page_count > (PREPAID_RECORD_SIZE - index))
+ 702   2              {
+ 703   3                  page_count = (uint8_t)(PREPAID_RECORD_SIZE - index);
+ 704   3              }
+ 705   2              if (!MeterEeprom_Start()) goto error;
+ 706   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(METER_EEPROM_ADDRESS << 1), 0x18)) goto error;
+ 707   2              if (!MeterEeprom_WriteI2cByte((uint8_t)(address >> 8), 0x28)) goto error;
+ 708   2              if (!MeterEeprom_WriteI2cByte((uint8_t)address, 0x28)) goto error;
+ 709   2              for (page_index = 0; page_index < page_count; page_index++)
+ 710   2              {
+ 711   3                  if (!MeterEeprom_WriteI2cByte(
+ 712   3                          prepaid_eeprom_record[index + page_index], 0x28)) goto error;
+ 713   3              }
+ 714   2              MeterEeprom_Stop();
+ 715   2              Board_DelayMs(5);
+ 716   2              index = (uint8_t)(index + page_count);
+ 717   2          }
+ 718   1          return 1;
+ 719   1      
+ 720   1      error:
+ 721   1          MeterEeprom_Stop();
+ 722   1          return 0;
+ 723   1      }
+ 724          
+ 725          static void Prepaid_SetBalance(int32_t balance)
+ 726          {
+ 727   1          uint16_t threshold;
+ 728   1      
+ 729   1          threshold = slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET];
+ 730   1          slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] = (balance < 0 ||
+ 731   1              ((uint32_t)balance <= (uint32_t)threshold)) ? 1 : 0;
+ 732   1          if (balance > 32767L)
+ 733   1          {
+ 734   2              balance = 32767L;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 13  
 
- 735   1          {
- 736   2              if (cost <= (uint32_t)balance)
- 737   2              {
- 738   3                  return balance - (int32_t)cost;
- 739   3              }
- 740   2              deficit = cost - (uint32_t)balance;
- 741   2              return (deficit >= 32768UL) ? -32768L : -(int32_t)deficit;
- 742   2          }
- 743   1      
- 744   1          deficit = (uint32_t)(-balance);
- 745   1          if (cost >= (32768UL - deficit))
- 746   1          {
- 747   2              return -32768L;
- 748   2          }
- 749   1          return balance - (int32_t)cost;
- 750   1      }
- 751          
- 752          static void Prepaid_RecomputeBalance(void)
- 753          {
- 754   1          int32_t balance;
- 755   1      
- 756   1          balance = prepaid_total_recharge_amount;
- 757   1          balance = Prepaid_SubtractConsumptionCost(balance,
- 758   1              slave_holding_registers[MAIN_CONSUMPTION_OFFSET],
- 759   1              slave_holding_registers[MAIN_RATE_OFFSET]);
- 760   1          balance = Prepaid_SubtractConsumptionCost(balance,
- 761   1              slave_holding_registers[DG_CONSUMPTION_OFFSET],
- 762   1              slave_holding_registers[DG_RATE_OFFSET]);
- 763   1          balance = Prepaid_SubtractConsumptionCost(balance,
- 764   1              slave_holding_registers[SOLAR_CONSUMPTION_OFFSET],
- 765   1              slave_holding_registers[SOLAR_RATE_OFFSET]);
- 766   1          Prepaid_SetBalance(balance);
- 767   1          prepaid_relay_sync_pending = 1;
- 768   1      }
- 769          
- 770          static void Prepaid_ServiceBalanceRelays(void)
- 771          {
- 772   1          uint8_t relay_index;
- 773   1          uint8_t relays_changed;
- 774   1          uint8_t desired_state;
- 775   1      
- 776   1          if (!prepaid_relay_sync_pending) return;
- 777   1          prepaid_relay_sync_pending = 0;
- 778   1          desired_state = (((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0) ||
- 779   1              slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0) ? 1 : 0;
- 780   1          relays_changed = 0;
- 781   1          for (relay_index = 0; relay_index < SLAVE_RELAY_COUNT; relay_index++)
- 782   1          {
- 783   2              if (!relay_state_known[relay_index] ||
- 784   2                  slave_relay_states[relay_index] != desired_state)
- 785   2              {
- 786   3                  Board_PulseRelay((uint8_t)(relay_index + 1), desired_state, 120);
- 787   3                  slave_relay_states[relay_index] = desired_state;
- 788   3                  slave_holding_registers[SLAVE_RELAY_START + relay_index] =
- 789   3                      desired_state;
- 790   3                  relay_state_known[relay_index] = 1;
- 791   3                  relays_changed = 1;
- 792   3              }
- 793   2          }
- 794   1          if (relays_changed)
- 795   1          {
- 796   2              prepaid_ui_events |= PREPAID_UI_EVENT_LOADS |
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 14  
+ 735   2          }
+ 736   1          else if (balance < -32768L)
+ 737   1          {
+ 738   2              balance = -32768L;
+ 739   2          }
+ 740   1          slave_holding_registers[BALANCE_OFFSET] = (uint16_t)(int16_t)balance;
+ 741   1      }
+ 742          
+ 743          static int32_t Prepaid_SubtractConsumptionCost(int32_t balance,
+ 744                                                         uint16_t consumption,
+ 745                                                         uint16_t rate)
+ 746          {
+ 747   1          uint32_t cost;
+ 748   1          uint32_t deficit;
+ 749   1      
+ 750   1          cost = (uint32_t)consumption * (uint32_t)rate;
+ 751   1          if (balance >= 0)
+ 752   1          {
+ 753   2              if (cost <= (uint32_t)balance)
+ 754   2              {
+ 755   3                  return balance - (int32_t)cost;
+ 756   3              }
+ 757   2              deficit = cost - (uint32_t)balance;
+ 758   2              return (deficit >= 32768UL) ? -32768L : -(int32_t)deficit;
+ 759   2          }
+ 760   1      
+ 761   1          deficit = (uint32_t)(-balance);
+ 762   1          if (cost >= (32768UL - deficit))
+ 763   1          {
+ 764   2              return -32768L;
+ 765   2          }
+ 766   1          return balance - (int32_t)cost;
+ 767   1      }
+ 768          
+ 769          static void Prepaid_RecomputeBalance(void)
+ 770          {
+ 771   1          int32_t balance;
+ 772   1      
+ 773   1          balance = prepaid_total_recharge_amount;
+ 774   1          balance = Prepaid_SubtractConsumptionCost(balance,
+ 775   1              slave_holding_registers[MAIN_CONSUMPTION_OFFSET],
+ 776   1              slave_holding_registers[MAIN_RATE_OFFSET]);
+ 777   1          balance = Prepaid_SubtractConsumptionCost(balance,
+ 778   1              slave_holding_registers[DG_CONSUMPTION_OFFSET],
+ 779   1              slave_holding_registers[DG_RATE_OFFSET]);
+ 780   1          balance = Prepaid_SubtractConsumptionCost(balance,
+ 781   1              slave_holding_registers[SOLAR_CONSUMPTION_OFFSET],
+ 782   1              slave_holding_registers[SOLAR_RATE_OFFSET]);
+ 783   1          Prepaid_SetBalance(balance);
+ 784   1          prepaid_relay_sync_pending = 1;
+ 785   1      }
+ 786          
+ 787          static void Prepaid_ServiceBalanceRelays(void)
+ 788          {
+ 789   1          uint8_t relay_index;
+ 790   1          uint8_t relays_changed;
+ 791   1          uint8_t desired_state;
+ 792   1      
+ 793   1          if (!prepaid_relay_sync_pending) return;
+ 794   1          prepaid_relay_sync_pending = 0;
+ 795   1          desired_state = (((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0) ||
+ 796   1              slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0) ? 1 : 0;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 14  
 
- 797   2                  PREPAID_UI_EVENT_ACTIVITY;
- 798   2          }
- 799   1      }
- 800          
- 801          static void Prepaid_SetDefaults(void)
- 802          {
- 803   1          uint8_t index;
- 804   1      
- 805   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
- 806   1          {
- 807   2              slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index] = 0;
- 808   2          }
- 809   1          slave_holding_registers[COMPANY_NAME_FIRST_OFFSET] = 0x5045;
- 810   1          slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + 1] = 0x4D43;
- 811   1          prepaid_total_recharge_amount = 0;
- 812   1          slave_holding_registers[MAIN_RATE_OFFSET] = 0;
- 813   1          slave_holding_registers[DG_RATE_OFFSET] = 0;
- 814   1          slave_holding_registers[SOLAR_RATE_OFFSET] = 0;
- 815   1          slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET] = 0;
- 816   1          slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET] = 0;
- 817   1          slave_holding_registers[MAIN_CONSUMPTION_OFFSET] = 0;
- 818   1          slave_holding_registers[DG_CONSUMPTION_OFFSET] = 0;
- 819   1          slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = 0;
- 820   1          Prepaid_RecomputeBalance();
- 821   1      }
- 822          
- 823          static void PrepaidEeprom_Load(void)
- 824          {
- 825   1          uint8_t index;
- 826   1          uint16_t crc;
- 827   1          uint16_t value;
- 828   1          uint8_t version;
- 829   1          uint32_t legacy_balance;
- 830   1          uint32_t migrated_recharge;
- 831   1          uint32_t cost;
- 832   1      
- 833   1          Prepaid_SetDefaults();
- 834   1          if (!meter_eeprom_present || !PrepaidEeprom_ReadRecord()) return;
- 835   1          crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
- 836   1          version = prepaid_eeprom_record[2];
- 837   1          if (prepaid_eeprom_record[0] != 0x50 || prepaid_eeprom_record[1] != 0x50 ||
- 838   1              (version != 1 && version != 2) ||
- 839   1              (version == 1 && (prepaid_eeprom_record[3] & 0xFE) != 0) ||
- 840   1              (version == 2 && prepaid_eeprom_record[3] != 0) ||
- 841   1              prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
- 842   1              prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
- 843   1          {
- 844   2              return;
- 845   2          }
- 846   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
- 847   1          {
- 848   2              value = ((uint16_t)prepaid_eeprom_record[4 + index * 2] << 8) |
- 849   2                  prepaid_eeprom_record[5 + index * 2];
- 850   2              if (!Prepaid_CompanyRegisterIsValid(value)) return;
- 851   2          }
- 852   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
- 853   1          {
- 854   2              slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index] =
- 855   2                  ((uint16_t)prepaid_eeprom_record[4 + index * 2] << 8) |
- 856   2                  prepaid_eeprom_record[5 + index * 2];
- 857   2          }
- 858   1          slave_holding_registers[MAIN_RATE_OFFSET] =
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 15  
+ 797   1          relays_changed = 0;
+ 798   1          for (relay_index = 0; relay_index < SLAVE_RELAY_COUNT; relay_index++)
+ 799   1          {
+ 800   2              if (!relay_state_known[relay_index] ||
+ 801   2                  slave_relay_states[relay_index] != desired_state)
+ 802   2              {
+ 803   3                  Board_PulseRelay((uint8_t)(relay_index + 1), desired_state, 120);
+ 804   3                  slave_relay_states[relay_index] = desired_state;
+ 805   3                  slave_holding_registers[SLAVE_RELAY_START + relay_index] =
+ 806   3                      desired_state;
+ 807   3                  relay_state_known[relay_index] = 1;
+ 808   3                  relays_changed = 1;
+ 809   3              }
+ 810   2          }
+ 811   1          if (relays_changed)
+ 812   1          {
+ 813   2              prepaid_ui_events |= PREPAID_UI_EVENT_LOADS |
+ 814   2                  PREPAID_UI_EVENT_ACTIVITY;
+ 815   2          }
+ 816   1      }
+ 817          
+ 818          static void Prepaid_SetDefaults(void)
+ 819          {
+ 820   1          uint8_t index;
+ 821   1      
+ 822   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
+ 823   1          {
+ 824   2              slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index] = 0;
+ 825   2          }
+ 826   1          slave_holding_registers[COMPANY_NAME_FIRST_OFFSET] = 0x5045;
+ 827   1          slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + 1] = 0x4D43;
+ 828   1          prepaid_total_recharge_amount = 0;
+ 829   1          slave_holding_registers[MAIN_RATE_OFFSET] = 0;
+ 830   1          slave_holding_registers[DG_RATE_OFFSET] = 0;
+ 831   1          slave_holding_registers[SOLAR_RATE_OFFSET] = 0;
+ 832   1          slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET] = 0;
+ 833   1          slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET] = 0;
+ 834   1          slave_holding_registers[MAIN_CONSUMPTION_OFFSET] = 0;
+ 835   1          slave_holding_registers[DG_CONSUMPTION_OFFSET] = 0;
+ 836   1          slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = 0;
+ 837   1          Prepaid_RecomputeBalance();
+ 838   1      }
+ 839          
+ 840          static void PrepaidEeprom_Load(void)
+ 841          {
+ 842   1          uint8_t index;
+ 843   1          uint16_t crc;
+ 844   1          uint16_t value;
+ 845   1          uint8_t version;
+ 846   1          uint32_t legacy_balance;
+ 847   1          uint32_t migrated_recharge;
+ 848   1          uint32_t cost;
+ 849   1      
+ 850   1          Prepaid_SetDefaults();
+ 851   1          if (!meter_eeprom_present || !PrepaidEeprom_ReadRecord()) return;
+ 852   1          crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
+ 853   1          version = prepaid_eeprom_record[2];
+ 854   1          if (prepaid_eeprom_record[0] != 0x50 || prepaid_eeprom_record[1] != 0x50 ||
+ 855   1              (version != 1 && version != 2) ||
+ 856   1              (version == 1 && (prepaid_eeprom_record[3] & 0xFE) != 0) ||
+ 857   1              (version == 2 && prepaid_eeprom_record[3] != 0) ||
+ 858   1              prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 15  
 
- 859   1              ((uint16_t)prepaid_eeprom_record[40] << 8) | prepaid_eeprom_record[41];
- 860   1          slave_holding_registers[DG_RATE_OFFSET] =
- 861   1              ((uint16_t)prepaid_eeprom_record[42] << 8) | prepaid_eeprom_record[43];
- 862   1          slave_holding_registers[SOLAR_RATE_OFFSET] =
- 863   1              ((uint16_t)prepaid_eeprom_record[44] << 8) | prepaid_eeprom_record[45];
- 864   1          slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET] =
- 865   1              ((uint16_t)prepaid_eeprom_record[46] << 8) | prepaid_eeprom_record[47];
- 866   1          slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET] =
- 867   1              ((uint16_t)prepaid_eeprom_record[48] << 8) | prepaid_eeprom_record[49];
- 868   1          for (index = 0; index < 3; index++)
- 869   1          {
- 870   2              value = ((uint16_t)prepaid_eeprom_record[50 + index * 2] << 8) |
- 871   2                  prepaid_eeprom_record[51 + index * 2];
- 872   2              if (index == 0)
- 873   2              {
- 874   3                  slave_holding_registers[MAIN_CONSUMPTION_OFFSET] = value;
- 875   3              }
- 876   2              else if (index == 1)
- 877   2              {
- 878   3                  slave_holding_registers[DG_CONSUMPTION_OFFSET] = value;
- 879   3              }
- 880   2              else
- 881   2              {
- 882   3                  slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = value;
- 883   3              }
- 884   2          }
- 885   1          if (version == 2)
+ 859   1              prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
+ 860   1          {
+ 861   2              return;
+ 862   2          }
+ 863   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
+ 864   1          {
+ 865   2              value = ((uint16_t)prepaid_eeprom_record[4 + index * 2] << 8) |
+ 866   2                  prepaid_eeprom_record[5 + index * 2];
+ 867   2              if (!Prepaid_CompanyRegisterIsValid(value)) return;
+ 868   2          }
+ 869   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
+ 870   1          {
+ 871   2              slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index] =
+ 872   2                  ((uint16_t)prepaid_eeprom_record[4 + index * 2] << 8) |
+ 873   2                  prepaid_eeprom_record[5 + index * 2];
+ 874   2          }
+ 875   1          slave_holding_registers[MAIN_RATE_OFFSET] =
+ 876   1              ((uint16_t)prepaid_eeprom_record[40] << 8) | prepaid_eeprom_record[41];
+ 877   1          slave_holding_registers[DG_RATE_OFFSET] =
+ 878   1              ((uint16_t)prepaid_eeprom_record[42] << 8) | prepaid_eeprom_record[43];
+ 879   1          slave_holding_registers[SOLAR_RATE_OFFSET] =
+ 880   1              ((uint16_t)prepaid_eeprom_record[44] << 8) | prepaid_eeprom_record[45];
+ 881   1          slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET] =
+ 882   1              ((uint16_t)prepaid_eeprom_record[46] << 8) | prepaid_eeprom_record[47];
+ 883   1          slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET] =
+ 884   1              ((uint16_t)prepaid_eeprom_record[48] << 8) | prepaid_eeprom_record[49];
+ 885   1          for (index = 0; index < 3; index++)
  886   1          {
- 887   2              prepaid_total_recharge_amount =
- 888   2                  ((uint16_t)prepaid_eeprom_record[36] << 8) |
- 889   2                  prepaid_eeprom_record[37];
- 890   2          }
- 891   1          else
- 892   1          {
- 893   2              /* Preserve the old displayed balance by carrying forward its equivalent
- 894   2               * total credit under the new cumulative-consumption formula. */
- 895   2              legacy_balance = Prepaid_ReadRecordU32(36);
- 896   2              migrated_recharge = (legacy_balance > 0xFFFFUL) ?
- 897   2                  0xFFFFUL : legacy_balance;
- 898   2              cost = (uint32_t)slave_holding_registers[MAIN_CONSUMPTION_OFFSET] *
- 899   2                  (uint32_t)slave_holding_registers[MAIN_RATE_OFFSET];
- 900   2              migrated_recharge = (cost > (0xFFFFUL - migrated_recharge)) ?
- 901   2                  0xFFFFUL : (migrated_recharge + cost);
- 902   2              cost = (uint32_t)slave_holding_registers[DG_CONSUMPTION_OFFSET] *
- 903   2                  (uint32_t)slave_holding_registers[DG_RATE_OFFSET];
- 904   2              migrated_recharge = (cost > (0xFFFFUL - migrated_recharge)) ?
- 905   2                  0xFFFFUL : (migrated_recharge + cost);
- 906   2              cost = (uint32_t)slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] *
- 907   2                  (uint32_t)slave_holding_registers[SOLAR_RATE_OFFSET];
- 908   2              migrated_recharge = (cost > (0xFFFFUL - migrated_recharge)) ?
- 909   2                  0xFFFFUL : (migrated_recharge + cost);
- 910   2              prepaid_total_recharge_amount = (uint16_t)migrated_recharge;
- 911   2              PrepaidEeprom_RequestSave();
- 912   2          }
- 913   1          Prepaid_RecomputeBalance();
- 914   1      }
- 915          
- 916          static void PrepaidEeprom_BuildRecord(void)
- 917          {
- 918   1          uint8_t index;
- 919   1          uint16_t value;
- 920   1          uint16_t crc;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 16  
+ 887   2              value = ((uint16_t)prepaid_eeprom_record[50 + index * 2] << 8) |
+ 888   2                  prepaid_eeprom_record[51 + index * 2];
+ 889   2              if (index == 0)
+ 890   2              {
+ 891   3                  slave_holding_registers[MAIN_CONSUMPTION_OFFSET] = value;
+ 892   3              }
+ 893   2              else if (index == 1)
+ 894   2              {
+ 895   3                  slave_holding_registers[DG_CONSUMPTION_OFFSET] = value;
+ 896   3              }
+ 897   2              else
+ 898   2              {
+ 899   3                  slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = value;
+ 900   3              }
+ 901   2          }
+ 902   1          if (version == 2)
+ 903   1          {
+ 904   2              prepaid_total_recharge_amount =
+ 905   2                  ((uint16_t)prepaid_eeprom_record[36] << 8) |
+ 906   2                  prepaid_eeprom_record[37];
+ 907   2          }
+ 908   1          else
+ 909   1          {
+ 910   2              /* Preserve the old displayed balance by carrying forward its equivalent
+ 911   2               * total credit under the new cumulative-consumption formula. */
+ 912   2              legacy_balance = Prepaid_ReadRecordU32(36);
+ 913   2              migrated_recharge = (legacy_balance > 0xFFFFUL) ?
+ 914   2                  0xFFFFUL : legacy_balance;
+ 915   2              cost = (uint32_t)slave_holding_registers[MAIN_CONSUMPTION_OFFSET] *
+ 916   2                  (uint32_t)slave_holding_registers[MAIN_RATE_OFFSET];
+ 917   2              migrated_recharge = (cost > (0xFFFFUL - migrated_recharge)) ?
+ 918   2                  0xFFFFUL : (migrated_recharge + cost);
+ 919   2              cost = (uint32_t)slave_holding_registers[DG_CONSUMPTION_OFFSET] *
+ 920   2                  (uint32_t)slave_holding_registers[DG_RATE_OFFSET];
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 16  
 
- 921   1      
- 922   1          prepaid_eeprom_record[0] = 0x50;
- 923   1          prepaid_eeprom_record[1] = 0x50;
- 924   1          prepaid_eeprom_record[2] = 2;
- 925   1          prepaid_eeprom_record[3] = 0;
- 926   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
- 927   1          {
- 928   2              value = slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index];
- 929   2              prepaid_eeprom_record[4 + index * 2] = (uint8_t)(value >> 8);
- 930   2              prepaid_eeprom_record[5 + index * 2] = (uint8_t)value;
- 931   2          }
- 932   1          for (index = (uint8_t)(COMPANY_NAME_REGISTER_COUNT * 2);
- 933   1               index < 32; index++)
- 934   1          {
- 935   2              prepaid_eeprom_record[4 + index] = 0;
- 936   2          }
- 937   1          value = prepaid_total_recharge_amount;
- 938   1          prepaid_eeprom_record[36] = (uint8_t)(value >> 8);
- 939   1          prepaid_eeprom_record[37] = (uint8_t)value;
- 940   1          prepaid_eeprom_record[38] = 0;
- 941   1          prepaid_eeprom_record[39] = 0;
- 942   1          value = slave_holding_registers[MAIN_RATE_OFFSET];
- 943   1          prepaid_eeprom_record[40] = (uint8_t)(value >> 8);
- 944   1          prepaid_eeprom_record[41] = (uint8_t)value;
- 945   1          value = slave_holding_registers[DG_RATE_OFFSET];
- 946   1          prepaid_eeprom_record[42] = (uint8_t)(value >> 8);
- 947   1          prepaid_eeprom_record[43] = (uint8_t)value;
- 948   1          value = slave_holding_registers[SOLAR_RATE_OFFSET];
- 949   1          prepaid_eeprom_record[44] = (uint8_t)(value >> 8);
- 950   1          prepaid_eeprom_record[45] = (uint8_t)value;
- 951   1          value = slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET];
- 952   1          prepaid_eeprom_record[46] = (uint8_t)(value >> 8);
- 953   1          prepaid_eeprom_record[47] = (uint8_t)value;
- 954   1          value = slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET];
- 955   1          prepaid_eeprom_record[48] = (uint8_t)(value >> 8);
- 956   1          prepaid_eeprom_record[49] = (uint8_t)value;
- 957   1          value = slave_holding_registers[MAIN_CONSUMPTION_OFFSET];
- 958   1          prepaid_eeprom_record[50] = (uint8_t)(value >> 8);
- 959   1          prepaid_eeprom_record[51] = (uint8_t)value;
- 960   1          value = slave_holding_registers[DG_CONSUMPTION_OFFSET];
- 961   1          prepaid_eeprom_record[52] = (uint8_t)(value >> 8);
- 962   1          prepaid_eeprom_record[53] = (uint8_t)value;
- 963   1          value = slave_holding_registers[SOLAR_CONSUMPTION_OFFSET];
- 964   1          prepaid_eeprom_record[54] = (uint8_t)(value >> 8);
- 965   1          prepaid_eeprom_record[55] = (uint8_t)value;
- 966   1          prepaid_eeprom_record[56] = 0;
- 967   1          prepaid_eeprom_record[57] = 0;
- 968   1          crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
- 969   1          prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] = (uint8_t)crc;
- 970   1          prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
- 971   1      }
- 972          
- 973          static void PrepaidEeprom_RequestSave(void)
- 974          {
- 975   1          if (!meter_eeprom_present) return;
- 976   1          prepaid_save_pending = 1;
- 977   1          prepaid_save_timer_ms = 0;
- 978   1      }
- 979          
- 980          static void PrepaidEeprom_Service(void)
- 981          {
- 982   1          uint8_t index;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 17  
+ 921   2              migrated_recharge = (cost > (0xFFFFUL - migrated_recharge)) ?
+ 922   2                  0xFFFFUL : (migrated_recharge + cost);
+ 923   2              cost = (uint32_t)slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] *
+ 924   2                  (uint32_t)slave_holding_registers[SOLAR_RATE_OFFSET];
+ 925   2              migrated_recharge = (cost > (0xFFFFUL - migrated_recharge)) ?
+ 926   2                  0xFFFFUL : (migrated_recharge + cost);
+ 927   2              prepaid_total_recharge_amount = (uint16_t)migrated_recharge;
+ 928   2              PrepaidEeprom_RequestSave();
+ 929   2          }
+ 930   1          Prepaid_RecomputeBalance();
+ 931   1      }
+ 932          
+ 933          static void PrepaidEeprom_BuildRecord(void)
+ 934          {
+ 935   1          uint8_t index;
+ 936   1          uint16_t value;
+ 937   1          uint16_t crc;
+ 938   1      
+ 939   1          prepaid_eeprom_record[0] = 0x50;
+ 940   1          prepaid_eeprom_record[1] = 0x50;
+ 941   1          prepaid_eeprom_record[2] = 2;
+ 942   1          prepaid_eeprom_record[3] = 0;
+ 943   1          for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
+ 944   1          {
+ 945   2              value = slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index];
+ 946   2              prepaid_eeprom_record[4 + index * 2] = (uint8_t)(value >> 8);
+ 947   2              prepaid_eeprom_record[5 + index * 2] = (uint8_t)value;
+ 948   2          }
+ 949   1          for (index = (uint8_t)(COMPANY_NAME_REGISTER_COUNT * 2);
+ 950   1               index < 32; index++)
+ 951   1          {
+ 952   2              prepaid_eeprom_record[4 + index] = 0;
+ 953   2          }
+ 954   1          value = prepaid_total_recharge_amount;
+ 955   1          prepaid_eeprom_record[36] = (uint8_t)(value >> 8);
+ 956   1          prepaid_eeprom_record[37] = (uint8_t)value;
+ 957   1          prepaid_eeprom_record[38] = 0;
+ 958   1          prepaid_eeprom_record[39] = 0;
+ 959   1          value = slave_holding_registers[MAIN_RATE_OFFSET];
+ 960   1          prepaid_eeprom_record[40] = (uint8_t)(value >> 8);
+ 961   1          prepaid_eeprom_record[41] = (uint8_t)value;
+ 962   1          value = slave_holding_registers[DG_RATE_OFFSET];
+ 963   1          prepaid_eeprom_record[42] = (uint8_t)(value >> 8);
+ 964   1          prepaid_eeprom_record[43] = (uint8_t)value;
+ 965   1          value = slave_holding_registers[SOLAR_RATE_OFFSET];
+ 966   1          prepaid_eeprom_record[44] = (uint8_t)(value >> 8);
+ 967   1          prepaid_eeprom_record[45] = (uint8_t)value;
+ 968   1          value = slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET];
+ 969   1          prepaid_eeprom_record[46] = (uint8_t)(value >> 8);
+ 970   1          prepaid_eeprom_record[47] = (uint8_t)value;
+ 971   1          value = slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET];
+ 972   1          prepaid_eeprom_record[48] = (uint8_t)(value >> 8);
+ 973   1          prepaid_eeprom_record[49] = (uint8_t)value;
+ 974   1          value = slave_holding_registers[MAIN_CONSUMPTION_OFFSET];
+ 975   1          prepaid_eeprom_record[50] = (uint8_t)(value >> 8);
+ 976   1          prepaid_eeprom_record[51] = (uint8_t)value;
+ 977   1          value = slave_holding_registers[DG_CONSUMPTION_OFFSET];
+ 978   1          prepaid_eeprom_record[52] = (uint8_t)(value >> 8);
+ 979   1          prepaid_eeprom_record[53] = (uint8_t)value;
+ 980   1          value = slave_holding_registers[SOLAR_CONSUMPTION_OFFSET];
+ 981   1          prepaid_eeprom_record[54] = (uint8_t)(value >> 8);
+ 982   1          prepaid_eeprom_record[55] = (uint8_t)value;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 17  
 
- 983   1      
- 984   1          if (!meter_eeprom_present || !prepaid_save_pending ||
- 985   1              prepaid_save_timer_ms < PREPAID_SAVE_DELAY_MS)
- 986   1          {
- 987   2              return;
- 988   2          }
- 989   1          PrepaidEeprom_BuildRecord();
- 990   1          for (index = 0; index < PREPAID_RECORD_SIZE; index++)
- 991   1          {
- 992   2              prepaid_eeprom_verify[index] = prepaid_eeprom_record[index];
- 993   2          }
- 994   1          if (!PrepaidEeprom_WriteRecord() || !PrepaidEeprom_ReadRecord())
- 995   1          {
- 996   2              prepaid_save_timer_ms = 0;
- 997   2              return;
- 998   2          }
- 999   1          for (index = 0; index < PREPAID_RECORD_SIZE; index++)
-1000   1          {
-1001   2              if (prepaid_eeprom_record[index] != prepaid_eeprom_verify[index])
-1002   2              {
-1003   3                  prepaid_save_timer_ms = 0;
-1004   3                  return;
-1005   3              }
-1006   2          }
-1007   1          prepaid_save_pending = 0;
-1008   1          prepaid_save_timer_ms = 0;
-1009   1      }
-1010          
-1011          static void Prepaid_CommitChanges(uint8_t change_flags)
-1012          {
-1013   1          if (change_flags & PREPAID_CHANGE_CREDIT)
-1014   1          {
-1015   2              prepaid_total_recharge_amount =
-1016   2                  slave_holding_registers[BALANCE_OFFSET];
-1017   2          }
-1018   1          if (change_flags & (PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION |
-1019   1              PREPAID_CHANGE_RATES | PREPAID_CHANGE_THRESHOLD))
-1020   1          {
-1021   2              Prepaid_RecomputeBalance();
-1022   2          }
-1023   1          if (change_flags & PREPAID_CHANGE_OVERRIDE)
-1024   1          {
-1025   2              prepaid_relay_sync_pending = 1;
-1026   2          }
-1027   1          if (change_flags & (PREPAID_CHANGE_COMPANY | PREPAID_CHANGE_RATES |
-1028   1              PREPAID_CHANGE_THRESHOLD | PREPAID_CHANGE_BACKLIGHT |
-1029   1              PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION))
-1030   1          {
-1031   2              PrepaidEeprom_RequestSave();
-1032   2          }
-1033   1          if (change_flags & PREPAID_CHANGE_COMPANY)
-1034   1          {
-1035   2              prepaid_ui_events |= PREPAID_UI_EVENT_COMPANY;
-1036   2          }
-1037   1          if (change_flags & PREPAID_CHANGE_LOADS)
-1038   1          {
-1039   2              prepaid_ui_events |= PREPAID_UI_EVENT_LOADS;
-1040   2          }
-1041   1          if (change_flags & PREPAID_CHANGE_RATES)
-1042   1          {
-1043   2              prepaid_ui_events |= PREPAID_UI_EVENT_RATES;
-1044   2          }
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 18  
+ 983   1          prepaid_eeprom_record[56] = 0;
+ 984   1          prepaid_eeprom_record[57] = 0;
+ 985   1          crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
+ 986   1          prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] = (uint8_t)crc;
+ 987   1          prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
+ 988   1      }
+ 989          
+ 990          static void PrepaidEeprom_RequestSave(void)
+ 991          {
+ 992   1          if (!meter_eeprom_present) return;
+ 993   1          prepaid_save_pending = 1;
+ 994   1          prepaid_save_timer_ms = 0;
+ 995   1      }
+ 996          
+ 997          static void PrepaidEeprom_Service(void)
+ 998          {
+ 999   1          uint8_t index;
+1000   1      
+1001   1          if (!meter_eeprom_present || !prepaid_save_pending ||
+1002   1              prepaid_save_timer_ms < PREPAID_SAVE_DELAY_MS)
+1003   1          {
+1004   2              return;
+1005   2          }
+1006   1          PrepaidEeprom_BuildRecord();
+1007   1          for (index = 0; index < PREPAID_RECORD_SIZE; index++)
+1008   1          {
+1009   2              prepaid_eeprom_verify[index] = prepaid_eeprom_record[index];
+1010   2          }
+1011   1          if (!PrepaidEeprom_WriteRecord() || !PrepaidEeprom_ReadRecord())
+1012   1          {
+1013   2              prepaid_save_timer_ms = 0;
+1014   2              return;
+1015   2          }
+1016   1          for (index = 0; index < PREPAID_RECORD_SIZE; index++)
+1017   1          {
+1018   2              if (prepaid_eeprom_record[index] != prepaid_eeprom_verify[index])
+1019   2              {
+1020   3                  prepaid_save_timer_ms = 0;
+1021   3                  return;
+1022   3              }
+1023   2          }
+1024   1          prepaid_save_pending = 0;
+1025   1          prepaid_save_timer_ms = 0;
+1026   1      }
+1027          
+1028          static void Prepaid_CommitChanges(uint8_t change_flags)
+1029          {
+1030   1          if (change_flags & PREPAID_CHANGE_CREDIT)
+1031   1          {
+1032   2              prepaid_total_recharge_amount =
+1033   2                  slave_holding_registers[BALANCE_OFFSET];
+1034   2          }
+1035   1          if (change_flags & (PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION |
+1036   1              PREPAID_CHANGE_RATES | PREPAID_CHANGE_THRESHOLD))
+1037   1          {
+1038   2              Prepaid_RecomputeBalance();
+1039   2          }
+1040   1          if (change_flags & PREPAID_CHANGE_OVERRIDE)
+1041   1          {
+1042   2              prepaid_relay_sync_pending = 1;
+1043   2          }
+1044   1          if (change_flags & (PREPAID_CHANGE_COMPANY | PREPAID_CHANGE_RATES |
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 18  
 
-1045   1          if (change_flags & (PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION |
-1046   1              PREPAID_CHANGE_RATES | PREPAID_CHANGE_THRESHOLD))
+1045   1              PREPAID_CHANGE_THRESHOLD | PREPAID_CHANGE_BACKLIGHT |
+1046   1              PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION))
 1047   1          {
-1048   2              prepaid_ui_events |= PREPAID_UI_EVENT_BALANCE;
+1048   2              PrepaidEeprom_RequestSave();
 1049   2          }
-1050   1          if (change_flags != 0)
+1050   1          if (change_flags & PREPAID_CHANGE_COMPANY)
 1051   1          {
-1052   2              prepaid_ui_events |= PREPAID_UI_EVENT_ACTIVITY;
+1052   2              prepaid_ui_events |= PREPAID_UI_EVENT_COMPANY;
 1053   2          }
-1054   1      }
-1055          
-1056          static void MeterEeprom_RequestSave(void)
-1057          {
-1058   1          uint8_t index;
-1059   1      
-1060   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
-1061   1          {
-1062   2              if (!meter_eeprom_has_saved_record ||
-1063   2                  s_energy_meter_registers[index] != meter_eeprom_last_saved[index])
-1064   2              {
-1065   3                  meter_eeprom_save_pending = 1;
-1066   3                  if (!meter_eeprom_has_saved_record)
-1067   3                  {
-1068   4                      meter_eeprom_save_timer_ms = METER_EEPROM_SAVE_INTERVAL_MS;
-1069   4                  }
-1070   3                  return;
-1071   3              }
-1072   2          }
-1073   1      }
-1074          
-1075          static void MeterEeprom_Service(void)
-1076          {
-1077   1          uint8_t index;
-1078   1      
-1079   1          if (!meter_eeprom_present || !meter_eeprom_save_pending ||
-1080   1              meter_eeprom_save_timer_ms < METER_EEPROM_SAVE_INTERVAL_MS)
-1081   1          {
-1082   2              return;
-1083   2          }
-1084   1          MeterEeprom_BuildRecord();
-1085   1          if (!MeterEeprom_WriteRecord())
-1086   1          {
-1087   2              meter_eeprom_last_error = 3;
-1088   2              meter_eeprom_save_timer_ms = 0;
-1089   2              return;
-1090   2          }
-1091   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
-1092   1          {
-1093   2              meter_eeprom_last_saved[index] = s_energy_meter_registers[index];
-1094   2          }
-1095   1          meter_eeprom_has_saved_record = 1;
-1096   1          meter_eeprom_save_pending = 0;
-1097   1          meter_eeprom_save_timer_ms = 0;
-1098   1          meter_eeprom_last_error = 0;
-1099   1          if (meter_eeprom_save_count != 0xFFFF)
-1100   1          {
-1101   2              meter_eeprom_save_count++;
-1102   2          }
-1103   1      }
-1104          
-1105          static uint8_t Modbus_FrameValid(uint8_t xdata *frame, uint8_t length)
-1106          {
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 19  
+1054   1          if (change_flags & PREPAID_CHANGE_LOADS)
+1055   1          {
+1056   2              prepaid_ui_events |= PREPAID_UI_EVENT_LOADS;
+1057   2          }
+1058   1          if (change_flags & PREPAID_CHANGE_RATES)
+1059   1          {
+1060   2              prepaid_ui_events |= PREPAID_UI_EVENT_RATES;
+1061   2          }
+1062   1          if (change_flags & (PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION |
+1063   1              PREPAID_CHANGE_RATES | PREPAID_CHANGE_THRESHOLD))
+1064   1          {
+1065   2              prepaid_ui_events |= PREPAID_UI_EVENT_BALANCE;
+1066   2          }
+1067   1          if (change_flags != 0)
+1068   1          {
+1069   2              prepaid_ui_events |= PREPAID_UI_EVENT_ACTIVITY;
+1070   2          }
+1071   1      }
+1072          
+1073          static void MeterEeprom_RequestSave(void)
+1074          {
+1075   1          uint8_t index;
+1076   1      
+1077   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+1078   1          {
+1079   2              if (!meter_eeprom_has_saved_record ||
+1080   2                  s_energy_meter_registers[index] != meter_eeprom_last_saved[index])
+1081   2              {
+1082   3                  meter_eeprom_save_pending = 1;
+1083   3                  if (!meter_eeprom_has_saved_record)
+1084   3                  {
+1085   4                      meter_eeprom_save_timer_ms = METER_EEPROM_SAVE_INTERVAL_MS;
+1086   4                  }
+1087   3                  return;
+1088   3              }
+1089   2          }
+1090   1      }
+1091          
+1092          static void MeterEeprom_Service(void)
+1093          {
+1094   1          uint8_t index;
+1095   1      
+1096   1          if (!meter_eeprom_present || !meter_eeprom_save_pending ||
+1097   1              meter_eeprom_save_timer_ms < METER_EEPROM_SAVE_INTERVAL_MS)
+1098   1          {
+1099   2              return;
+1100   2          }
+1101   1          MeterEeprom_BuildRecord();
+1102   1          if (!MeterEeprom_WriteRecord())
+1103   1          {
+1104   2              meter_eeprom_last_error = 3;
+1105   2              meter_eeprom_save_timer_ms = 0;
+1106   2              return;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 19  
 
-1107   1          uint16_t crc;
-1108   1      
-1109   1          if (length < 4)
-1110   1          {
-1111   2              return 0;
-1112   2          }
-1113   1          crc = Modbus_Crc16(frame, length - 2);
-1114   1          return (frame[length - 2] == (uint8_t)crc &&
-1115   1                  frame[length - 1] == (uint8_t)(crc >> 8));
-1116   1      }
-1117          
-1118          static void RS485_ClearMeterRegisters(void)
-1119          {
-1120   1          uint8_t index;
-1121   1      
-1122   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
-1123   1          {
-1124   2              energy_meter_registers[index] = 0;
-1125   2          }
-1126   1      }
-1127          
-1128          void RS485_UART0_ISR(void) interrupt 4
-1129          {
-1130   1          uint8_t sfr_page;
-1131   1          uint8_t value;
-1132   1      
-1133   1          sfr_page = SFRS;
-1134   1          SFRS = 0;
-1135   1          if (RI)
-1136   1          {
-1137   2              value = SBUF;
-1138   2              RI = 0;
-1139   2              if (port2_parity != RS485_PARITY_NONE &&
-1140   2                  RB8 != RS485_ParityBit(value, port2_parity))
-1141   2              {
-1142   3                  port2_rx_parity_error = 1;
-1143   3              }
-1144   2              if (port2_rx_length < RX_BUFFER_SIZE)
-1145   2              {
-1146   3                  port2_rx_buffer[port2_rx_length++] = value;
-1147   3                  port2_silence_ms = 0;
-1148   3              }
-1149   2          }
-1150   1          if (TI)
-1151   1          {
-1152   2              TI = 0;
-1153   2              port2_tx_complete = 1;
-1154   2          }
-1155   1          SFRS = sfr_page;
-1156   1      }
-1157          
-1158          void RS485_UART1_ISR(void) interrupt 15
-1159          {
-1160   1          uint8_t sfr_page;
-1161   1          uint8_t value;
-1162   1      
-1163   1          sfr_page = SFRS;
-1164   1          SFRS = 0;
-1165   1          if (RI_1)
-1166   1          {
-1167   2              value = SBUF_1;
-1168   2              RI_1 = 0;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 20  
+1107   2          }
+1108   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+1109   1          {
+1110   2              meter_eeprom_last_saved[index] = s_energy_meter_registers[index];
+1111   2          }
+1112   1          meter_eeprom_has_saved_record = 1;
+1113   1          meter_eeprom_save_pending = 0;
+1114   1          meter_eeprom_save_timer_ms = 0;
+1115   1          meter_eeprom_last_error = 0;
+1116   1          if (meter_eeprom_save_count != 0xFFFF)
+1117   1          {
+1118   2              meter_eeprom_save_count++;
+1119   2          }
+1120   1      }
+1121          
+1122          static uint8_t Modbus_FrameValid(uint8_t xdata *frame, uint8_t length)
+1123          {
+1124   1          uint16_t crc;
+1125   1      
+1126   1          if (length < 4)
+1127   1          {
+1128   2              return 0;
+1129   2          }
+1130   1          crc = Modbus_Crc16(frame, length - 2);
+1131   1          return (frame[length - 2] == (uint8_t)crc &&
+1132   1                  frame[length - 1] == (uint8_t)(crc >> 8));
+1133   1      }
+1134          
+1135          static void RS485_ClearMeterRegisters(void)
+1136          {
+1137   1          uint8_t index;
+1138   1      
+1139   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+1140   1          {
+1141   2              energy_meter_registers[index] = 0;
+1142   2          }
+1143   1      }
+1144          
+1145          void RS485_UART0_ISR(void) interrupt 4
+1146          {
+1147   1          uint8_t sfr_page;
+1148   1          uint8_t value;
+1149   1      
+1150   1          sfr_page = SFRS;
+1151   1          SFRS = 0;
+1152   1          if (RI)
+1153   1          {
+1154   2              value = SBUF;
+1155   2              RI = 0;
+1156   2              if (port2_parity != RS485_PARITY_NONE &&
+1157   2                  RB8 != RS485_ParityBit(value, port2_parity))
+1158   2              {
+1159   3                  port2_rx_parity_error = 1;
+1160   3              }
+1161   2              if (port2_rx_length < RX_BUFFER_SIZE)
+1162   2              {
+1163   3                  port2_rx_buffer[port2_rx_length++] = value;
+1164   3                  port2_silence_ms = 0;
+1165   3              }
+1166   2          }
+1167   1          if (TI)
+1168   1          {
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 20  
 
-1169   2              if (port1_rx_byte_count != 0xFFFF)
-1170   2              {
-1171   3                  port1_rx_byte_count++;
-1172   3              }
-1173   2              if (port1_parity != RS485_PARITY_NONE &&
-1174   2                  RB8_1 != RS485_ParityBit(value, port1_parity))
-1175   2              {
-1176   3                  port1_rx_parity_error = 1;
-1177   3                  if (port1_parity_error_count != 0xFFFF)
-1178   3                  {
-1179   4                      port1_parity_error_count++;
-1180   4                  }
-1181   3              }
-1182   2              if (port1_rx_length < RX_BUFFER_SIZE)
-1183   2              {
-1184   3                  port1_rx_buffer[port1_rx_length++] = value;
-1185   3                  port1_silence_ms = 0;
-1186   3              }
-1187   2          }
-1188   1          if (TI_1)
-1189   1          {
-1190   2              TI_1 = 0;
-1191   2              port1_tx_complete = 1;
-1192   2          }
-1193   1          SFRS = sfr_page;
-1194   1      }
-1195          
-1196          static void RS485_SendFrame(uint8_t port, uint8_t xdata *frame, uint8_t length)
-1197          {
-1198   1          uint8_t index;
-1199   1          uint16_t crc;
-1200   1      
-1201   1          crc = Modbus_Crc16(frame, length);
-1202   1          frame[length] = (uint8_t)crc;
-1203   1          frame[length + 1] = (uint8_t)(crc >> 8);
-1204   1      
-1205   1          Board_SetRs485Transmit(port, 1);
-1206   1          if (port == 1)
-1207   1          {
-1208   2              Board_DelayMs(1);
+1169   2              TI = 0;
+1170   2              port2_tx_complete = 1;
+1171   2          }
+1172   1          SFRS = sfr_page;
+1173   1      }
+1174          
+1175          void RS485_UART1_ISR(void) interrupt 15
+1176          {
+1177   1          uint8_t sfr_page;
+1178   1          uint8_t value;
+1179   1      
+1180   1          sfr_page = SFRS;
+1181   1          SFRS = 0;
+1182   1          if (RI_1)
+1183   1          {
+1184   2              value = SBUF_1;
+1185   2              RI_1 = 0;
+1186   2              if (port1_rx_byte_count != 0xFFFF)
+1187   2              {
+1188   3                  port1_rx_byte_count++;
+1189   3              }
+1190   2              if (port1_parity != RS485_PARITY_NONE &&
+1191   2                  RB8_1 != RS485_ParityBit(value, port1_parity))
+1192   2              {
+1193   3                  port1_rx_parity_error = 1;
+1194   3                  if (port1_parity_error_count != 0xFFFF)
+1195   3                  {
+1196   4                      port1_parity_error_count++;
+1197   4                  }
+1198   3              }
+1199   2              if (port1_rx_length < RX_BUFFER_SIZE)
+1200   2              {
+1201   3                  port1_rx_buffer[port1_rx_length++] = value;
+1202   3                  port1_silence_ms = 0;
+1203   3              }
+1204   2          }
+1205   1          if (TI_1)
+1206   1          {
+1207   2              TI_1 = 0;
+1208   2              port1_tx_complete = 1;
 1209   2          }
-1210   1          for (index = 0; index < (uint8_t)(length + 2); index++)
-1211   1          {
-1212   2              RS485_SendByte(port, frame[index]);
-1213   2          }
-1214   1          Board_DelayMs(2);
-1215   1          Board_SetRs485Transmit(port, 0);
-1216   1      }
-1217          
-1218          static void Modbus_SendException(uint8_t function, uint8_t exception_code)
-1219          {
-1220   1          tx_buffer[0] = port1_slave_id;
-1221   1          tx_buffer[1] = function | 0x80;
-1222   1          tx_buffer[2] = exception_code;
-1223   1          RS485_SendFrame(1, tx_buffer, 3);
-1224   1      }
-1225          
-1226          static void RS485_ConfigurePort1Uart(void)
-1227          {
-1228   1          UART_Open(24000000UL, UART1_Timer3, port1_baud_rate);
-1229   1          SFRS = 0;
-1230   1          SCON_1 = (port1_parity == RS485_PARITY_NONE) ? 0x50 : 0xD0;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 21  
+1210   1          SFRS = sfr_page;
+1211   1      }
+1212          
+1213          static void RS485_SendFrame(uint8_t port, uint8_t xdata *frame, uint8_t length)
+1214          {
+1215   1          uint8_t index;
+1216   1          uint16_t crc;
+1217   1      
+1218   1          crc = Modbus_Crc16(frame, length);
+1219   1          frame[length] = (uint8_t)crc;
+1220   1          frame[length + 1] = (uint8_t)(crc >> 8);
+1221   1      
+1222   1          Board_SetRs485Transmit(port, 1);
+1223   1          if (port == 1)
+1224   1          {
+1225   2              Board_DelayMs(1);
+1226   2          }
+1227   1          for (index = 0; index < (uint8_t)(length + 2); index++)
+1228   1          {
+1229   2              RS485_SendByte(port, frame[index]);
+1230   2          }
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 21  
 
-1231   1          RI_1 = 0;
-1232   1          TI_1 = 0;
+1231   1          Board_DelayMs(2);
+1232   1          Board_SetRs485Transmit(port, 0);
 1233   1      }
 1234          
-1235          static void RS485_ConfigurePort2Uart(void)
+1235          static void Modbus_SendException(uint8_t function, uint8_t exception_code)
 1236          {
-1237   1          UART_Open(24000000UL, UART0_Timer1, port2_baud_rate);
-1238   1          SFRS = 0;
-1239   1          SCON = (port2_parity == RS485_PARITY_NONE) ? 0x50 : 0xD0;
-1240   1          RI = 0;
-1241   1          TI = 0;
-1242   1      }
-1243          
-1244          void RS485_GetCommunicationSettings(uint8_t port, uint32_t *baud_rate,
-1245                                              uint8_t *parity, uint8_t *slave_id)
-1246          {
-1247   1          if (port == 1)
-1248   1          {
-1249   2              *baud_rate = port1_baud_rate;
-1250   2              *parity = port1_parity;
-1251   2              *slave_id = port1_slave_id;
-1252   2          }
-1253   1          else
-1254   1          {
-1255   2              *baud_rate = port2_baud_rate;
-1256   2              *parity = port2_parity;
-1257   2              *slave_id = meter_slave_id;
-1258   2          }
+1237   1          tx_buffer[0] = port1_slave_id;
+1238   1          tx_buffer[1] = function | 0x80;
+1239   1          tx_buffer[2] = exception_code;
+1240   1          RS485_SendFrame(1, tx_buffer, 3);
+1241   1      }
+1242          
+1243          static void RS485_ConfigurePort1Uart(void)
+1244          {
+1245   1          UART_Open(24000000UL, UART1_Timer3, port1_baud_rate);
+1246   1          SFRS = 0;
+1247   1          SCON_1 = (port1_parity == RS485_PARITY_NONE) ? 0x50 : 0xD0;
+1248   1          RI_1 = 0;
+1249   1          TI_1 = 0;
+1250   1      }
+1251          
+1252          static void RS485_ConfigurePort2Uart(void)
+1253          {
+1254   1          UART_Open(24000000UL, UART0_Timer1, port2_baud_rate);
+1255   1          SFRS = 0;
+1256   1          SCON = (port2_parity == RS485_PARITY_NONE) ? 0x50 : 0xD0;
+1257   1          RI = 0;
+1258   1          TI = 0;
 1259   1      }
 1260          
-1261          static void RS485_ApplyCommunicationConfig(void)
-1262          {
-1263   1          uint32_t new_port1_baud;
-1264   1          uint32_t new_port2_baud;
-1265   1          uint8_t new_port1_parity;
-1266   1          uint8_t new_port2_parity;
-1267   1          uint8_t new_port1_id;
-1268   1          uint8_t new_meter_id;
-1269   1          uint8_t port1_uart_changed;
-1270   1          uint8_t port2_uart_changed;
-1271   1          uint8_t meter_id_changed;
-1272   1          uint8_t changed;
-1273   1      
-1274   1          if (!comm_config_pending) return;
-1275   1          comm_config_pending = 0;
-1276   1          if (!RS485_ConfigRegistersAreValid()) return;
-1277   1      
-1278   1          new_port1_baud = RS485_ReadConfiguredBaud(SLAVE_PORT1_BAUD_HIGH_OFFSET);
-1279   1          new_port1_parity = (uint8_t)slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET];
-1280   1          new_port1_id = (uint8_t)slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
-1281   1          new_port2_baud = RS485_ReadConfiguredBaud(SLAVE_PORT2_BAUD_HIGH_OFFSET);
-1282   1          new_port2_parity = (uint8_t)slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET];
-1283   1          new_meter_id = (uint8_t)slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
-1284   1      
-1285   1          port1_uart_changed = (uint8_t)(new_port1_baud != port1_baud_rate ||
-1286   1                                         new_port1_parity != port1_parity);
-1287   1          port2_uart_changed = (uint8_t)(new_port2_baud != port2_baud_rate ||
-1288   1                                         new_port2_parity != port2_parity);
-1289   1          meter_id_changed = (uint8_t)(new_meter_id != meter_slave_id);
-1290   1          changed = (uint8_t)(port1_uart_changed || port2_uart_changed ||
-1291   1                              new_port1_id != port1_slave_id ||
-1292   1                              meter_id_changed);
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 22  
+1261          void RS485_GetCommunicationSettings(uint8_t port, uint32_t *baud_rate,
+1262                                              uint8_t *parity, uint8_t *slave_id)
+1263          {
+1264   1          if (port == 1)
+1265   1          {
+1266   2              *baud_rate = port1_baud_rate;
+1267   2              *parity = port1_parity;
+1268   2              *slave_id = port1_slave_id;
+1269   2          }
+1270   1          else
+1271   1          {
+1272   2              *baud_rate = port2_baud_rate;
+1273   2              *parity = port2_parity;
+1274   2              *slave_id = meter_slave_id;
+1275   2          }
+1276   1      }
+1277          
+1278          static void RS485_ApplyCommunicationConfig(void)
+1279          {
+1280   1          uint32_t new_port1_baud;
+1281   1          uint32_t new_port2_baud;
+1282   1          uint8_t new_port1_parity;
+1283   1          uint8_t new_port2_parity;
+1284   1          uint8_t new_port1_id;
+1285   1          uint8_t new_meter_id;
+1286   1          uint8_t port1_uart_changed;
+1287   1          uint8_t port2_uart_changed;
+1288   1          uint8_t meter_id_changed;
+1289   1          uint8_t changed;
+1290   1      
+1291   1          if (!comm_config_pending) return;
+1292   1          comm_config_pending = 0;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 22  
 
-1293   1      
-1294   1          port1_baud_rate = new_port1_baud;
-1295   1          port1_parity = new_port1_parity;
-1296   1          port1_slave_id = new_port1_id;
-1297   1          port2_baud_rate = new_port2_baud;
-1298   1          port2_parity = new_port2_parity;
-1299   1          meter_slave_id = new_meter_id;
-1300   1      
-1301   1          if (port1_uart_changed)
-1302   1          {
-1303   2              RS485_ConfigurePort1Uart();
-1304   2              port1_rx_length = 0;
-1305   2              port1_rx_parity_error = 0;
-1306   2              port1_silence_ms = 0;
-1307   2          }
-1308   1          if (port2_uart_changed)
-1309   1          {
-1310   2              RS485_ConfigurePort2Uart();
-1311   2          }
-1312   1          if (port2_uart_changed || meter_id_changed)
-1313   1          {
-1314   2              port2_rx_length = 0;
-1315   2              port2_rx_parity_error = 0;
-1316   2              port2_silence_ms = 0;
-1317   2              master_waiting = 0;
-1318   2              energy_meter_master_state = 0;
-1319   2              energy_meter_connected = 0;
-1320   2              energy_meter_data_valid = 0;
-1321   2              master_timer_ms = MASTER_POLL_INTERVAL_MS;
-1322   2          }
-1323   1          if (changed)
-1324   1          {
-1325   2              CommConfig_Save();
-1326   2          }
-1327   1      }
-1328          
-1329          static uint16_t RS485_ReadActiveCommunicationRegister(uint16_t offset)
-1330          {
-1331   1          switch (offset)
-1332   1          {
-1333   2              case SLAVE_PORT1_BAUD_HIGH_OFFSET:
-1334   2                  return (uint16_t)(port1_baud_rate >> 16);
-1335   2              case SLAVE_PORT1_BAUD_LOW_OFFSET:
-1336   2                  return (uint16_t)port1_baud_rate;
-1337   2              case SLAVE_PORT1_PARITY_OFFSET:
-1338   2                  return port1_parity;
-1339   2              case SLAVE_PORT1_ID_OFFSET:
-1340   2                  return port1_slave_id;
-1341   2              case SLAVE_PORT2_BAUD_HIGH_OFFSET:
-1342   2                  return (uint16_t)(port2_baud_rate >> 16);
-1343   2              case SLAVE_PORT2_BAUD_LOW_OFFSET:
-1344   2                  return (uint16_t)port2_baud_rate;
-1345   2              case SLAVE_PORT2_PARITY_OFFSET:
-1346   2                  return port2_parity;
-1347   2              case SLAVE_PORT2_ID_OFFSET:
-1348   2                  return meter_slave_id;
-1349   2              default:
-1350   2                  return 0;
-1351   2          }
-1352   1      }
-1353          
-1354          static void Modbus_HandleSlaveFrame(uint8_t length)
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 23  
+1293   1          if (!RS485_ConfigRegistersAreValid()) return;
+1294   1      
+1295   1          new_port1_baud = RS485_ReadConfiguredBaud(SLAVE_PORT1_BAUD_HIGH_OFFSET);
+1296   1          new_port1_parity = (uint8_t)slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET];
+1297   1          new_port1_id = (uint8_t)slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
+1298   1          new_port2_baud = RS485_ReadConfiguredBaud(SLAVE_PORT2_BAUD_HIGH_OFFSET);
+1299   1          new_port2_parity = (uint8_t)slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET];
+1300   1          new_meter_id = (uint8_t)slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
+1301   1      
+1302   1          port1_uart_changed = (uint8_t)(new_port1_baud != port1_baud_rate ||
+1303   1                                         new_port1_parity != port1_parity);
+1304   1          port2_uart_changed = (uint8_t)(new_port2_baud != port2_baud_rate ||
+1305   1                                         new_port2_parity != port2_parity);
+1306   1          meter_id_changed = (uint8_t)(new_meter_id != meter_slave_id);
+1307   1          changed = (uint8_t)(port1_uart_changed || port2_uart_changed ||
+1308   1                              new_port1_id != port1_slave_id ||
+1309   1                              meter_id_changed);
+1310   1      
+1311   1          port1_baud_rate = new_port1_baud;
+1312   1          port1_parity = new_port1_parity;
+1313   1          port1_slave_id = new_port1_id;
+1314   1          port2_baud_rate = new_port2_baud;
+1315   1          port2_parity = new_port2_parity;
+1316   1          meter_slave_id = new_meter_id;
+1317   1      
+1318   1          if (port1_uart_changed)
+1319   1          {
+1320   2              RS485_ConfigurePort1Uart();
+1321   2              port1_rx_length = 0;
+1322   2              port1_rx_parity_error = 0;
+1323   2              port1_silence_ms = 0;
+1324   2          }
+1325   1          if (port2_uart_changed)
+1326   1          {
+1327   2              RS485_ConfigurePort2Uart();
+1328   2          }
+1329   1          if (port2_uart_changed || meter_id_changed)
+1330   1          {
+1331   2              port2_rx_length = 0;
+1332   2              port2_rx_parity_error = 0;
+1333   2              port2_silence_ms = 0;
+1334   2              master_waiting = 0;
+1335   2              energy_meter_master_state = 0;
+1336   2              energy_meter_connected = 0;
+1337   2              energy_meter_data_valid = 0;
+1338   2              master_timer_ms = MASTER_POLL_INTERVAL_MS;
+1339   2          }
+1340   1          if (changed)
+1341   1          {
+1342   2              CommConfig_Save();
+1343   2          }
+1344   1      }
+1345          
+1346          static uint16_t RS485_ReadActiveCommunicationRegister(uint16_t offset)
+1347          {
+1348   1          switch (offset)
+1349   1          {
+1350   2              case SLAVE_PORT1_BAUD_HIGH_OFFSET:
+1351   2                  return (uint16_t)(port1_baud_rate >> 16);
+1352   2              case SLAVE_PORT1_BAUD_LOW_OFFSET:
+1353   2                  return (uint16_t)port1_baud_rate;
+1354   2              case SLAVE_PORT1_PARITY_OFFSET:
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 23  
 
-1355          {
-1356   1          uint8_t function;
-1357   1          uint8_t quantity;
-1358   1          uint8_t index;
-1359   1          uint8_t relay_index;
-1360   1          uint8_t byte_count;
-1361   1          uint8_t config_touched;
-1362   1          uint8_t change_flags;
-1363   1          uint16_t start_address;
-1364   1          uint16_t value;
-1365   1          uint16_t register_offset;
-1366   1      
-1367   1          if (!Modbus_FrameValid(port1_rx_buffer, length))
-1368   1          {
-1369   2              if (port1_bad_crc_count != 0xFFFF)
-1370   2              {
-1371   3                  port1_bad_crc_count++;
-1372   3              }
-1373   2              return;
-1374   2          }
-1375   1          if (port1_rx_buffer[0] != port1_slave_id)
-1376   1          {
-1377   2              if (port1_wrong_address_count != 0xFFFF)
-1378   2              {
-1379   3                  port1_wrong_address_count++;
-1380   3              }
-1381   2              return;
-1382   2          }
+1355   2                  return port1_parity;
+1356   2              case SLAVE_PORT1_ID_OFFSET:
+1357   2                  return port1_slave_id;
+1358   2              case SLAVE_PORT2_BAUD_HIGH_OFFSET:
+1359   2                  return (uint16_t)(port2_baud_rate >> 16);
+1360   2              case SLAVE_PORT2_BAUD_LOW_OFFSET:
+1361   2                  return (uint16_t)port2_baud_rate;
+1362   2              case SLAVE_PORT2_PARITY_OFFSET:
+1363   2                  return port2_parity;
+1364   2              case SLAVE_PORT2_ID_OFFSET:
+1365   2                  return meter_slave_id;
+1366   2              default:
+1367   2                  return 0;
+1368   2          }
+1369   1      }
+1370          
+1371          static void Modbus_HandleSlaveFrame(uint8_t length)
+1372          {
+1373   1          uint8_t function;
+1374   1          uint8_t quantity;
+1375   1          uint8_t index;
+1376   1          uint8_t relay_index;
+1377   1          uint8_t byte_count;
+1378   1          uint8_t config_touched;
+1379   1          uint8_t change_flags;
+1380   1          uint16_t start_address;
+1381   1          uint16_t value;
+1382   1          uint16_t register_offset;
 1383   1      
-1384   1          if (port1_valid_request_count != 0xFFFF)
+1384   1          if (!Modbus_FrameValid(port1_rx_buffer, length))
 1385   1          {
-1386   2              port1_valid_request_count++;
-1387   2          }
-1388   1      
-1389   1          function = port1_rx_buffer[1];
-1390   1          start_address = ((uint16_t)port1_rx_buffer[2] << 8) |
-1391   1                          port1_rx_buffer[3];
-1392   1      
-1393   1          if (function == 0x03)
-1394   1          {
-1395   2              if (length != 8)
-1396   2              {
-1397   3                  return;
-1398   3              }
-1399   2              if (port1_rx_buffer[4] != 0)
-1400   2              {
-1401   3                  Modbus_SendException(function, 0x03);
-1402   3                  return;
-1403   3              }
-1404   2              quantity = port1_rx_buffer[5];
-1405   2              if (quantity == 0 || quantity > SLAVE_REGISTER_COUNT)
-1406   2              {
-1407   3                  Modbus_SendException(function, 0x03);
-1408   3                  return;
-1409   3              }
-1410   2      
-1411   2              /* 40001..40050 use offsets 0..49; relays occupy offsets 4..6. */
-1412   2              if (start_address < SLAVE_REGISTER_COUNT)
+1386   2              if (port1_bad_crc_count != 0xFFFF)
+1387   2              {
+1388   3                  port1_bad_crc_count++;
+1389   3              }
+1390   2              return;
+1391   2          }
+1392   1          if (port1_rx_buffer[0] != port1_slave_id)
+1393   1          {
+1394   2              if (port1_wrong_address_count != 0xFFFF)
+1395   2              {
+1396   3                  port1_wrong_address_count++;
+1397   3              }
+1398   2              return;
+1399   2          }
+1400   1      
+1401   1          if (port1_valid_request_count != 0xFFFF)
+1402   1          {
+1403   2              port1_valid_request_count++;
+1404   2          }
+1405   1      
+1406   1          function = port1_rx_buffer[1];
+1407   1          start_address = ((uint16_t)port1_rx_buffer[2] << 8) |
+1408   1                          port1_rx_buffer[3];
+1409   1      
+1410   1          if (function == 0x03)
+1411   1          {
+1412   2              if (length != 8)
 1413   2              {
-1414   3                  if ((uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
-1415   3                  {
-1416   4                      Modbus_SendException(function, 0x02);
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 24  
+1414   3                  return;
+1415   3              }
+1416   2              if (port1_rx_buffer[4] != 0)
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 24  
 
-1417   4                      return;
-1418   4                  }
-1419   3                  for (index = 0; index < quantity; index++)
-1420   3                  {
-1421   4                      register_offset = (uint16_t)(start_address + index);
-1422   4                      if (register_offset >= SLAVE_RELAY_START &&
-1423   4                          register_offset <
-1424   4                              (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
-1425   4                      {
-1426   5                          value = slave_relay_states[
-1427   5                              register_offset - SLAVE_RELAY_START];
-1428   5                      }
-1429   4                      else if (RS485_IsCommunicationConfigOffset(register_offset))
-1430   4                      {
-1431   5                          /* Report the live settings, not an incomplete baud write. */
-1432   5                          value = RS485_ReadActiveCommunicationRegister(
-1433   5                              register_offset);
-1434   5                      }
-1435   4                      else
-1436   4                      {
-1437   5                          value = slave_holding_registers[register_offset];
-1438   5                      }
-1439   4                      tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
-1440   4                      tx_buffer[4 + (index * 2)] = (uint8_t)value;
-1441   4                  }
-1442   3              }
-1443   2              else
-1444   2              {
-1445   3                  Modbus_SendException(function, 0x02);
-1446   3                  return;
-1447   3              }
-1448   2      
-1449   2              tx_buffer[0] = port1_slave_id;
-1450   2              tx_buffer[1] = function;
-1451   2              tx_buffer[2] = quantity * 2;
-1452   2              RS485_SendFrame(1, tx_buffer, (uint8_t)(3 + quantity * 2));
-1453   2              if (port1_response_count != 0xFFFF)
-1454   2              {
-1455   3                  port1_response_count++;
-1456   3              }
-1457   2              return;
-1458   2          }
-1459   1      
-1460   1          if (function == 0x06)
-1461   1          {
-1462   2              if (length != 8)
+1417   2              {
+1418   3                  Modbus_SendException(function, 0x03);
+1419   3                  return;
+1420   3              }
+1421   2              quantity = port1_rx_buffer[5];
+1422   2              if (quantity == 0 || quantity > SLAVE_REGISTER_COUNT)
+1423   2              {
+1424   3                  Modbus_SendException(function, 0x03);
+1425   3                  return;
+1426   3              }
+1427   2      
+1428   2              /* Controller registers use offsets 0..49; meter data uses 200..249. */
+1429   2              if (start_address < SLAVE_REGISTER_COUNT)
+1430   2              {
+1431   3                  if ((uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
+1432   3                  {
+1433   4                      Modbus_SendException(function, 0x02);
+1434   4                      return;
+1435   4                  }
+1436   3                  for (index = 0; index < quantity; index++)
+1437   3                  {
+1438   4                      register_offset = (uint16_t)(start_address + index);
+1439   4                      if (register_offset >= SLAVE_RELAY_START &&
+1440   4                          register_offset <
+1441   4                              (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+1442   4                      {
+1443   5                          value = slave_relay_states[
+1444   5                              register_offset - SLAVE_RELAY_START];
+1445   5                      }
+1446   4                      else if (RS485_IsCommunicationConfigOffset(register_offset))
+1447   4                      {
+1448   5                          /* Report the live settings, not an incomplete baud write. */
+1449   5                          value = RS485_ReadActiveCommunicationRegister(
+1450   5                              register_offset);
+1451   5                      }
+1452   4                      else
+1453   4                      {
+1454   5                          value = slave_holding_registers[register_offset];
+1455   5                      }
+1456   4                      tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
+1457   4                      tx_buffer[4 + (index * 2)] = (uint8_t)value;
+1458   4                  }
+1459   3              }
+1460   2              else if (start_address >= METER_SLAVE_HOLDING_START_OFFSET &&
+1461   2                       (uint32_t)start_address + quantity <=
+1462   2                          (METER_SLAVE_HOLDING_START_OFFSET + METER_REGISTER_COUNT))
 1463   2              {
-1464   3                  return;
-1465   3              }
-1466   2              value = ((uint16_t)port1_rx_buffer[4] << 8) | port1_rx_buffer[5];
-1467   2              if (start_address >= SLAVE_REGISTER_COUNT)
-1468   2              {
-1469   3                  Modbus_SendException(function, 0x02);
-1470   3                  return;
-1471   3              }
-1472   2              if (!RS485_IsWritableRegisterValueValid(start_address, value))
-1473   2              {
-1474   3                  Modbus_SendException(function,
-1475   3                      (start_address < ENERGY_METER_REGISTER_COUNT) ? 0x02 : 0x03);
+1464   3                  for (index = 0; index < quantity; index++)
+1465   3                  {
+1466   4                      register_offset = (uint16_t)(start_address + index -
+1467   4                          METER_SLAVE_HOLDING_START_OFFSET);
+1468   4                      value = s_energy_meter_registers[register_offset];
+1469   4                      tx_buffer[3 + (index * 2)] = (uint8_t)(value >> 8);
+1470   4                      tx_buffer[4 + (index * 2)] = (uint8_t)value;
+1471   4                  }
+1472   3              }
+1473   2              else
+1474   2              {
+1475   3                  Modbus_SendException(function, 0x02);
 1476   3                  return;
 1477   3              }
-1478   2              change_flags = 0;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 25  
+1478   2      
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 25  
 
-1479   2              if (start_address >= SLAVE_RELAY_START &&
-1480   2                  start_address < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
-1481   2              {
-1482   3                  relay_index = (uint8_t)(start_address - SLAVE_RELAY_START);
-1483   3                  if (!relay_state_known[relay_index] ||
-1484   3                      slave_relay_states[relay_index] != (uint8_t)value)
-1485   3                  {
-1486   4                      Board_PulseRelay((uint8_t)(relay_index + 1),
-1487   4                                       (uint8_t)value, 120);
-1488   4                      change_flags |= PREPAID_CHANGE_LOADS;
-1489   4                  }
-1490   3                  slave_relay_states[relay_index] = (uint8_t)value;
-1491   3                  slave_holding_registers[start_address] = value;
-1492   3                  relay_state_known[relay_index] = 1;
-1493   3              }
-1494   2              else
-1495   2              {
-1496   3                  if (start_address == BALANCE_OFFSET ||
-1497   3                      start_address == BMS_RELAY_OVERRIDE_OFFSET ||
-1498   3                      slave_holding_registers[start_address] != value)
-1499   3                  {
-1500   4                      change_flags |= Prepaid_ChangeFlagForOffset(start_address);
-1501   4                  }
-1502   3                  slave_holding_registers[start_address] = value;
-1503   3                  if (RS485_IsCommunicationConfigOffset(start_address))
-1504   3                  {
-1505   4                      comm_config_pending = 1;
-1506   4                  }
+1479   2              tx_buffer[0] = port1_slave_id;
+1480   2              tx_buffer[1] = function;
+1481   2              tx_buffer[2] = quantity * 2;
+1482   2              RS485_SendFrame(1, tx_buffer, (uint8_t)(3 + quantity * 2));
+1483   2              if (port1_response_count != 0xFFFF)
+1484   2              {
+1485   3                  port1_response_count++;
+1486   3              }
+1487   2              return;
+1488   2          }
+1489   1      
+1490   1          if (function == 0x06)
+1491   1          {
+1492   2              if (length != 8)
+1493   2              {
+1494   3                  return;
+1495   3              }
+1496   2              value = ((uint16_t)port1_rx_buffer[4] << 8) | port1_rx_buffer[5];
+1497   2              if (start_address >= SLAVE_REGISTER_COUNT)
+1498   2              {
+1499   3                  Modbus_SendException(function, 0x02);
+1500   3                  return;
+1501   3              }
+1502   2              if (!RS485_IsWritableRegisterValueValid(start_address, value))
+1503   2              {
+1504   3                  Modbus_SendException(function,
+1505   3                      (start_address < SLAVE_RELAY_START) ? 0x02 : 0x03);
+1506   3                  return;
 1507   3              }
-1508   2              Prepaid_CommitChanges(change_flags);
-1509   2      
-1510   2              tx_buffer[0] = port1_slave_id;
-1511   2              tx_buffer[1] = function;
-1512   2              tx_buffer[2] = (uint8_t)(start_address >> 8);
-1513   2              tx_buffer[3] = (uint8_t)start_address;
-1514   2              tx_buffer[4] = (uint8_t)(value >> 8);
-1515   2              tx_buffer[5] = (uint8_t)value;
-1516   2              RS485_SendFrame(1, tx_buffer, 6);
-1517   2              if (port1_response_count != 0xFFFF)
-1518   2              {
-1519   3                  port1_response_count++;
-1520   3              }
-1521   2              return;
-1522   2          }
-1523   1      
-1524   1          if (function == 0x10)
-1525   1          {
-1526   2              if (length < 9)
-1527   2              {
-1528   3                  return;
-1529   3              }
-1530   2              if (port1_rx_buffer[4] != 0)
-1531   2              {
-1532   3                  Modbus_SendException(function, 0x03);
-1533   3                  return;
-1534   3              }
-1535   2              quantity = port1_rx_buffer[5];
-1536   2              byte_count = port1_rx_buffer[6];
-1537   2              if (quantity == 0 || quantity > SLAVE_REGISTER_COUNT ||
-1538   2                  byte_count != (uint8_t)(quantity * 2) ||
-1539   2                  length != (uint8_t)(9 + byte_count))
-1540   2              {
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 26  
+1508   2              change_flags = 0;
+1509   2              if (start_address >= SLAVE_RELAY_START &&
+1510   2                  start_address < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+1511   2              {
+1512   3                  relay_index = (uint8_t)(start_address - SLAVE_RELAY_START);
+1513   3                  if (!relay_state_known[relay_index] ||
+1514   3                      slave_relay_states[relay_index] != (uint8_t)value)
+1515   3                  {
+1516   4                      Board_PulseRelay((uint8_t)(relay_index + 1),
+1517   4                                       (uint8_t)value, 120);
+1518   4                      change_flags |= PREPAID_CHANGE_LOADS;
+1519   4                  }
+1520   3                  slave_relay_states[relay_index] = (uint8_t)value;
+1521   3                  slave_holding_registers[start_address] = value;
+1522   3                  relay_state_known[relay_index] = 1;
+1523   3              }
+1524   2              else
+1525   2              {
+1526   3                  if (start_address == BALANCE_OFFSET ||
+1527   3                      start_address == BMS_RELAY_OVERRIDE_OFFSET ||
+1528   3                      slave_holding_registers[start_address] != value)
+1529   3                  {
+1530   4                      change_flags |= Prepaid_ChangeFlagForOffset(start_address);
+1531   4                  }
+1532   3                  slave_holding_registers[start_address] = value;
+1533   3                  if (RS485_IsCommunicationConfigOffset(start_address))
+1534   3                  {
+1535   4                      comm_config_pending = 1;
+1536   4                  }
+1537   3              }
+1538   2              Prepaid_CommitChanges(change_flags);
+1539   2      
+1540   2              tx_buffer[0] = port1_slave_id;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 26  
 
-1541   3                  Modbus_SendException(function, 0x03);
-1542   3                  return;
-1543   3              }
-1544   2              if (start_address < ENERGY_METER_REGISTER_COUNT ||
-1545   2                  (uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
-1546   2              {
-1547   3                  Modbus_SendException(function, 0x02);
-1548   3                  return;
-1549   3              }
-1550   2      
-1551   2              config_touched = 0;
-1552   2              change_flags = 0;
-1553   2              for (index = 0; index < quantity; index++)
-1554   2              {
-1555   3                  register_offset = start_address + index;
-1556   3                  value = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
-1557   3                          port1_rx_buffer[8 + (index * 2)];
-1558   3                  if (!RS485_IsWritableRegisterValueValid(register_offset, value))
-1559   3                  {
-1560   4                      Modbus_SendException(function, 0x03);
-1561   4                      return;
-1562   4                  }
-1563   3                  if (RS485_IsCommunicationConfigOffset(register_offset))
-1564   3                  {
-1565   4                      config_touched = 1;
-1566   4                  }
-1567   3                  if (register_offset == BALANCE_OFFSET ||
-1568   3                      register_offset == BMS_RELAY_OVERRIDE_OFFSET ||
-1569   3                      slave_holding_registers[register_offset] != value)
-1570   3                  {
-1571   4                      change_flags |= Prepaid_ChangeFlagForOffset(register_offset);
-1572   4                  }
+1541   2              tx_buffer[1] = function;
+1542   2              tx_buffer[2] = (uint8_t)(start_address >> 8);
+1543   2              tx_buffer[3] = (uint8_t)start_address;
+1544   2              tx_buffer[4] = (uint8_t)(value >> 8);
+1545   2              tx_buffer[5] = (uint8_t)value;
+1546   2              RS485_SendFrame(1, tx_buffer, 6);
+1547   2              if (port1_response_count != 0xFFFF)
+1548   2              {
+1549   3                  port1_response_count++;
+1550   3              }
+1551   2              return;
+1552   2          }
+1553   1      
+1554   1          if (function == 0x10)
+1555   1          {
+1556   2              if (length < 9)
+1557   2              {
+1558   3                  return;
+1559   3              }
+1560   2              if (port1_rx_buffer[4] != 0)
+1561   2              {
+1562   3                  Modbus_SendException(function, 0x03);
+1563   3                  return;
+1564   3              }
+1565   2              quantity = port1_rx_buffer[5];
+1566   2              byte_count = port1_rx_buffer[6];
+1567   2              if (quantity == 0 || quantity > SLAVE_REGISTER_COUNT ||
+1568   2                  byte_count != (uint8_t)(quantity * 2) ||
+1569   2                  length != (uint8_t)(9 + byte_count))
+1570   2              {
+1571   3                  Modbus_SendException(function, 0x03);
+1572   3                  return;
 1573   3              }
-1574   2              if (config_touched)
-1575   2              {
-1576   3                  for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
-1577   3                  {
-1578   4                      comm_config_backup[index] =
-1579   4                          slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index];
-1580   4                  }
-1581   3                  for (index = 0; index < quantity; index++)
-1582   3                  {
-1583   4                      register_offset = start_address + index;
-1584   4                      if (RS485_IsCommunicationConfigOffset(register_offset))
-1585   4                      {
-1586   5                          slave_holding_registers[register_offset] =
-1587   5                              ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
-1588   5                              port1_rx_buffer[8 + (index * 2)];
-1589   5                      }
-1590   4                  }
-1591   3                  if (!RS485_ConfigRegistersAreValid())
-1592   3                  {
-1593   4                      for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
-1594   4                      {
-1595   5                          slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index] =
-1596   5                              comm_config_backup[index];
-1597   5                      }
-1598   4                      Modbus_SendException(function, 0x03);
-1599   4                      return;
-1600   4                  }
-1601   3              }
-1602   2      
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 27  
+1574   2              if (start_address < SLAVE_RELAY_START ||
+1575   2                  (uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
+1576   2              {
+1577   3                  Modbus_SendException(function, 0x02);
+1578   3                  return;
+1579   3              }
+1580   2      
+1581   2              config_touched = 0;
+1582   2              change_flags = 0;
+1583   2              for (index = 0; index < quantity; index++)
+1584   2              {
+1585   3                  register_offset = start_address + index;
+1586   3                  value = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
+1587   3                          port1_rx_buffer[8 + (index * 2)];
+1588   3                  if (!RS485_IsWritableRegisterValueValid(register_offset, value))
+1589   3                  {
+1590   4                      Modbus_SendException(function, 0x03);
+1591   4                      return;
+1592   4                  }
+1593   3                  if (RS485_IsCommunicationConfigOffset(register_offset))
+1594   3                  {
+1595   4                      config_touched = 1;
+1596   4                  }
+1597   3                  if (register_offset == BALANCE_OFFSET ||
+1598   3                      register_offset == BMS_RELAY_OVERRIDE_OFFSET ||
+1599   3                      slave_holding_registers[register_offset] != value)
+1600   3                  {
+1601   4                      change_flags |= Prepaid_ChangeFlagForOffset(register_offset);
+1602   4                  }
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 27  
 
-1603   2              for (index = 0; index < quantity; index++)
-1604   2              {
-1605   3                  register_offset = start_address + index;
-1606   3                  if (RS485_IsCommunicationConfigOffset(register_offset))
+1603   3              }
+1604   2              if (config_touched)
+1605   2              {
+1606   3                  for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
 1607   3                  {
-1608   4                      continue;
-1609   4                  }
-1610   3                  value = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
-1611   3                          port1_rx_buffer[8 + (index * 2)];
-1612   3                  if (register_offset >= SLAVE_RELAY_START &&
-1613   3                      register_offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
-1614   3                  {
-1615   4                      relay_index = (uint8_t)(register_offset - SLAVE_RELAY_START);
-1616   4                      if (!relay_state_known[relay_index] ||
-1617   4                          slave_relay_states[relay_index] != (uint8_t)value)
-1618   4                      {
-1619   5                          Board_PulseRelay((uint8_t)(relay_index + 1),
-1620   5                                           (uint8_t)value, 120);
-1621   5                          change_flags |= PREPAID_CHANGE_LOADS;
-1622   5                      }
-1623   4                      slave_relay_states[relay_index] = (uint8_t)value;
-1624   4                      relay_state_known[relay_index] = 1;
-1625   4                  }
-1626   3                  slave_holding_registers[register_offset] = value;
-1627   3              }
-1628   2              if (config_touched)
-1629   2              {
-1630   3                  comm_config_pending = 1;
+1608   4                      comm_config_backup[index] =
+1609   4                          slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index];
+1610   4                  }
+1611   3                  for (index = 0; index < quantity; index++)
+1612   3                  {
+1613   4                      register_offset = start_address + index;
+1614   4                      if (RS485_IsCommunicationConfigOffset(register_offset))
+1615   4                      {
+1616   5                          slave_holding_registers[register_offset] =
+1617   5                              ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
+1618   5                              port1_rx_buffer[8 + (index * 2)];
+1619   5                      }
+1620   4                  }
+1621   3                  if (!RS485_ConfigRegistersAreValid())
+1622   3                  {
+1623   4                      for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
+1624   4                      {
+1625   5                          slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index] =
+1626   5                              comm_config_backup[index];
+1627   5                      }
+1628   4                      Modbus_SendException(function, 0x03);
+1629   4                      return;
+1630   4                  }
 1631   3              }
-1632   2              Prepaid_CommitChanges(change_flags);
-1633   2      
-1634   2              tx_buffer[0] = port1_slave_id;
-1635   2              tx_buffer[1] = function;
-1636   2              tx_buffer[2] = (uint8_t)(start_address >> 8);
-1637   2              tx_buffer[3] = (uint8_t)start_address;
-1638   2              tx_buffer[4] = 0;
-1639   2              tx_buffer[5] = quantity;
-1640   2              RS485_SendFrame(1, tx_buffer, 6);
-1641   2              if (port1_response_count != 0xFFFF)
-1642   2              {
-1643   3                  port1_response_count++;
-1644   3              }
-1645   2              return;
-1646   2          }
-1647   1      
-1648   1          Modbus_SendException(function, 0x01);
-1649   1      }
-1650          
-1651          static void RS485_StartMeterRead(void)
-1652          {
-1653   1          tx_buffer[0] = meter_slave_id;
-1654   1          tx_buffer[1] = 0x03;
-1655   1          tx_buffer[2] = (uint8_t)(METER_REGISTER_START >> 8);
-1656   1          tx_buffer[3] = (uint8_t)METER_REGISTER_START;
-1657   1          tx_buffer[4] = 0;
-1658   1          tx_buffer[5] = METER_REGISTER_COUNT;
-1659   1          port2_rx_length = 0;
-1660   1          port2_rx_parity_error = 0;
-1661   1          port2_silence_ms = 0;
-1662   1          RS485_SendFrame(2, tx_buffer, 6);
-1663   1          master_waiting = 1;
-1664   1          energy_meter_master_state = 1;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 28  
+1632   2      
+1633   2              for (index = 0; index < quantity; index++)
+1634   2              {
+1635   3                  register_offset = start_address + index;
+1636   3                  if (RS485_IsCommunicationConfigOffset(register_offset))
+1637   3                  {
+1638   4                      continue;
+1639   4                  }
+1640   3                  value = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
+1641   3                          port1_rx_buffer[8 + (index * 2)];
+1642   3                  if (register_offset >= SLAVE_RELAY_START &&
+1643   3                      register_offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+1644   3                  {
+1645   4                      relay_index = (uint8_t)(register_offset - SLAVE_RELAY_START);
+1646   4                      if (!relay_state_known[relay_index] ||
+1647   4                          slave_relay_states[relay_index] != (uint8_t)value)
+1648   4                      {
+1649   5                          Board_PulseRelay((uint8_t)(relay_index + 1),
+1650   5                                           (uint8_t)value, 120);
+1651   5                          change_flags |= PREPAID_CHANGE_LOADS;
+1652   5                      }
+1653   4                      slave_relay_states[relay_index] = (uint8_t)value;
+1654   4                      relay_state_known[relay_index] = 1;
+1655   4                  }
+1656   3                  slave_holding_registers[register_offset] = value;
+1657   3              }
+1658   2              if (config_touched)
+1659   2              {
+1660   3                  comm_config_pending = 1;
+1661   3              }
+1662   2              Prepaid_CommitChanges(change_flags);
+1663   2      
+1664   2              tx_buffer[0] = port1_slave_id;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 28  
 
-1665   1          if (energy_meter_request_count != 0xFFFF)
-1666   1          {
-1667   2              energy_meter_request_count++;
-1668   2          }
-1669   1          master_timeout_ms = 0;
-1670   1      }
-1671          
-1672          static void RS485_HandleMeterResponse(uint8_t length)
-1673          {
-1674   1          uint8_t index;
-1675   1          uint8_t expected_length;
-1676   1      
-1677   1          if (!master_waiting)
-1678   1          {
-1679   2              return;
-1680   2          }
-1681   1          if (!Modbus_FrameValid(port2_rx_buffer, length) ||
-1682   1              port2_rx_buffer[0] != meter_slave_id)
-1683   1          {
-1684   2              energy_meter_last_error = ENERGY_METER_ERROR_BAD_FRAME;
-1685   2              if (energy_meter_invalid_frame_count != 0xFFFF)
-1686   2              {
-1687   3                  energy_meter_invalid_frame_count++;
-1688   3              }
-1689   2              return;
-1690   2          }
-1691   1          if (port2_rx_buffer[1] & 0x80)
-1692   1          {
-1693   2              energy_meter_last_error = ENERGY_METER_ERROR_EXCEPTION;
-1694   2              energy_meter_last_exception = port2_rx_buffer[2];
-1695   2              energy_meter_connected = 0;
-1696   2              energy_meter_data_valid = 0;
-1697   2              RS485_ClearMeterRegisters();
-1698   2              master_waiting = 0;
-1699   2              energy_meter_master_state = 0;
-1700   2              return;
-1701   2          }
-1702   1          expected_length = (uint8_t)(5 + METER_REGISTER_COUNT * 2);
-1703   1          if (port2_rx_buffer[1] != 0x03 ||
-1704   1              port2_rx_buffer[2] != (METER_REGISTER_COUNT * 2) ||
-1705   1              length != expected_length)
-1706   1          {
-1707   2              energy_meter_last_error = ENERGY_METER_ERROR_BAD_RESPONSE;
-1708   2              if (energy_meter_invalid_frame_count != 0xFFFF)
-1709   2              {
-1710   3                  energy_meter_invalid_frame_count++;
-1711   3              }
-1712   2              energy_meter_connected = 0;
-1713   2              energy_meter_data_valid = 0;
-1714   2              RS485_ClearMeterRegisters();
-1715   2              master_waiting = 0;
-1716   2              energy_meter_master_state = 0;
-1717   2              return;
-1718   2          }
-1719   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
-1720   1          {
-1721   2              energy_meter_registers[index] =
-1722   2                  ((uint16_t)port2_rx_buffer[3 + (index * 2)] << 8) |
-1723   2                  port2_rx_buffer[4 + (index * 2)];
-1724   2      
-1725   2              s_energy_meter_registers[index] = energy_meter_registers[index];
-1726   2              slave_holding_registers[index] = energy_meter_registers[index];
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 29  
+1665   2              tx_buffer[1] = function;
+1666   2              tx_buffer[2] = (uint8_t)(start_address >> 8);
+1667   2              tx_buffer[3] = (uint8_t)start_address;
+1668   2              tx_buffer[4] = 0;
+1669   2              tx_buffer[5] = quantity;
+1670   2              RS485_SendFrame(1, tx_buffer, 6);
+1671   2              if (port1_response_count != 0xFFFF)
+1672   2              {
+1673   3                  port1_response_count++;
+1674   3              }
+1675   2              return;
+1676   2          }
+1677   1      
+1678   1          Modbus_SendException(function, 0x01);
+1679   1      }
+1680          
+1681          static void RS485_StartMeterRead(void)
+1682          {
+1683   1          tx_buffer[0] = meter_slave_id;
+1684   1          tx_buffer[1] = 0x03;
+1685   1          tx_buffer[2] = (uint8_t)(METER_REGISTER_START >> 8);
+1686   1          tx_buffer[3] = (uint8_t)METER_REGISTER_START;
+1687   1          tx_buffer[4] = 0;
+1688   1          tx_buffer[5] = METER_REGISTER_COUNT;
+1689   1          port2_rx_length = 0;
+1690   1          port2_rx_parity_error = 0;
+1691   1          port2_silence_ms = 0;
+1692   1          RS485_SendFrame(2, tx_buffer, 6);
+1693   1          master_waiting = 1;
+1694   1          energy_meter_master_state = 1;
+1695   1          if (energy_meter_request_count != 0xFFFF)
+1696   1          {
+1697   2              energy_meter_request_count++;
+1698   2          }
+1699   1          master_timeout_ms = 0;
+1700   1      }
+1701          
+1702          static void RS485_HandleMeterResponse(uint8_t length)
+1703          {
+1704   1          uint8_t index;
+1705   1          uint8_t expected_length;
+1706   1      
+1707   1          if (!master_waiting)
+1708   1          {
+1709   2              return;
+1710   2          }
+1711   1          if (!Modbus_FrameValid(port2_rx_buffer, length) ||
+1712   1              port2_rx_buffer[0] != meter_slave_id)
+1713   1          {
+1714   2              energy_meter_last_error = ENERGY_METER_ERROR_BAD_FRAME;
+1715   2              if (energy_meter_invalid_frame_count != 0xFFFF)
+1716   2              {
+1717   3                  energy_meter_invalid_frame_count++;
+1718   3              }
+1719   2              return;
+1720   2          }
+1721   1          if (port2_rx_buffer[1] & 0x80)
+1722   1          {
+1723   2              energy_meter_last_error = ENERGY_METER_ERROR_EXCEPTION;
+1724   2              energy_meter_last_exception = port2_rx_buffer[2];
+1725   2              energy_meter_connected = 0;
+1726   2              energy_meter_data_valid = 0;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 29  
 
-1727   2          }
-1728   1          energy_meter_connected = 1;
-1729   1          energy_meter_data_valid = 1;
-1730   1          MeterEeprom_RequestSave();
-1731   1          energy_meter_last_error = ENERGY_METER_ERROR_NONE;
-1732   1          energy_meter_last_exception = 0;
-1733   1          if (energy_meter_successful_responses != 0xFFFF)
-1734   1          {
-1735   2              energy_meter_successful_responses++;
-1736   2          }
-1737   1          master_waiting = 0;
-1738   1          energy_meter_master_state = 0;
-1739   1      }
-1740          
-1741          void RS485_TestInit(void)
-1742          {
-1743   1          uint8_t index;
-1744   1      
-1745   1          IE &= 0x7F;
-1746   1          P37_INPUT_MODE;
-1747   1          P36_QUASI_MODE;
-1748   1          P06_PUSHPULL_MODE;
-1749   1          P07_INPUT_MODE;
-1750   1          ENABLE_UART1_TXD_P36;
-1751   1          ENABLE_UART1_RXD_P37;
-1752   1          SFRS = 0;
-1753   1          port1_tx_complete = 0;
-1754   1          port2_tx_complete = 0;
-1755   1          Board_SetRs485Transmit(1, 0);
-1756   1          Board_SetRs485Transmit(2, 0);
-1757   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
-1758   1          {
-1759   2              energy_meter_registers[index] = 0;
-1760   2              s_energy_meter_registers[index] = 0;
-1761   2              meter_eeprom_last_saved[index] = 0;
-1762   2          }
-1763   1          for (index = 0; index < SLAVE_REGISTER_COUNT; index++)
-1764   1          {
-1765   2              slave_holding_registers[index] = 0;
-1766   2          }
-1767   1          RS485_SetDefaultCommunicationRegisters();
-1768   1          for (index = 0; index < SLAVE_RELAY_COUNT; index++)
-1769   1          {
-1770   2              slave_relay_states[index] = 0;
-1771   2              relay_state_known[index] = 0;
-1772   2          }
-1773   1          energy_meter_connected = 0;
-1774   1          energy_meter_data_valid = 0;
-1775   1          energy_meter_successful_responses = 0;
-1776   1          energy_meter_master_state = 0;
-1777   1          energy_meter_poll_count = 0;
-1778   1          energy_meter_request_count = 0;
-1779   1          energy_meter_last_error = ENERGY_METER_ERROR_NONE;
-1780   1          energy_meter_timeout_count = 0;
-1781   1          energy_meter_parity_error_count = 0;
-1782   1          energy_meter_invalid_frame_count = 0;
-1783   1          energy_meter_last_exception = 0;
-1784   1          port1_rx_byte_count = 0;
-1785   1          port1_parity_error_count = 0;
-1786   1          port1_valid_request_count = 0;
-1787   1          port1_response_count = 0;
-1788   1          port1_bad_crc_count = 0;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 30  
+1727   2              RS485_ClearMeterRegisters();
+1728   2              master_waiting = 0;
+1729   2              energy_meter_master_state = 0;
+1730   2              return;
+1731   2          }
+1732   1          expected_length = (uint8_t)(5 + METER_REGISTER_COUNT * 2);
+1733   1          if (port2_rx_buffer[1] != 0x03 ||
+1734   1              port2_rx_buffer[2] != (METER_REGISTER_COUNT * 2) ||
+1735   1              length != expected_length)
+1736   1          {
+1737   2              energy_meter_last_error = ENERGY_METER_ERROR_BAD_RESPONSE;
+1738   2              if (energy_meter_invalid_frame_count != 0xFFFF)
+1739   2              {
+1740   3                  energy_meter_invalid_frame_count++;
+1741   3              }
+1742   2              energy_meter_connected = 0;
+1743   2              energy_meter_data_valid = 0;
+1744   2              RS485_ClearMeterRegisters();
+1745   2              master_waiting = 0;
+1746   2              energy_meter_master_state = 0;
+1747   2              return;
+1748   2          }
+1749   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+1750   1          {
+1751   2              energy_meter_registers[index] =
+1752   2                  ((uint16_t)port2_rx_buffer[3 + (index * 2)] << 8) |
+1753   2                  port2_rx_buffer[4 + (index * 2)];
+1754   2      
+1755   2              s_energy_meter_registers[index] = energy_meter_registers[index];
+1756   2          }
+1757   1          energy_meter_connected = 1;
+1758   1          energy_meter_data_valid = 1;
+1759   1          MeterEeprom_RequestSave();
+1760   1          energy_meter_last_error = ENERGY_METER_ERROR_NONE;
+1761   1          energy_meter_last_exception = 0;
+1762   1          if (energy_meter_successful_responses != 0xFFFF)
+1763   1          {
+1764   2              energy_meter_successful_responses++;
+1765   2          }
+1766   1          master_waiting = 0;
+1767   1          energy_meter_master_state = 0;
+1768   1      }
+1769          
+1770          void RS485_TestInit(void)
+1771          {
+1772   1          uint8_t index;
+1773   1      
+1774   1          IE &= 0x7F;
+1775   1          P37_INPUT_MODE;
+1776   1          P36_QUASI_MODE;
+1777   1          P06_PUSHPULL_MODE;
+1778   1          P07_INPUT_MODE;
+1779   1          ENABLE_UART1_TXD_P36;
+1780   1          ENABLE_UART1_RXD_P37;
+1781   1          SFRS = 0;
+1782   1          port1_tx_complete = 0;
+1783   1          port2_tx_complete = 0;
+1784   1          Board_SetRs485Transmit(1, 0);
+1785   1          Board_SetRs485Transmit(2, 0);
+1786   1          for (index = 0; index < METER_REGISTER_COUNT; index++)
+1787   1          {
+1788   2              energy_meter_registers[index] = 0;
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 30  
 
-1789   1          port1_wrong_address_count = 0;
-1790   1          port1_last_frame_length = 0;
-1791   1          for (index = 0; index < 8; index++)
-1792   1          {
-1793   2              port1_last_frame[index] = 0;
-1794   2          }
-1795   1          port1_rx_length = 0;
-1796   1          port2_rx_length = 0;
-1797   1          port1_silence_ms = 0;
-1798   1          port2_silence_ms = 0;
-1799   1          port1_rx_parity_error = 0;
-1800   1          port2_rx_parity_error = 0;
-1801   1          meter_eeprom_present = 0;
-1802   1          meter_eeprom_loaded = 0;
-1803   1          meter_eeprom_last_error = 0;
-1804   1          meter_eeprom_save_count = 0;
-1805   1          meter_eeprom_save_pending = 0;
-1806   1          meter_eeprom_has_saved_record = 0;
-1807   1          meter_eeprom_save_timer_ms = 0;
-1808   1          prepaid_save_pending = 0;
-1809   1          prepaid_save_timer_ms = 0;
-1810   1          prepaid_ui_events = 0;
-1811   1          prepaid_relay_sync_pending = 0;
-1812   1          comm_config_pending = 0;
-1813   1          MeterEeprom_Init();
-1814   1          MeterEeprom_Load();
-1815   1          CommConfig_Load();
-1816   1          PrepaidEeprom_Load();
-1817   1          port1_baud_rate = RS485_ReadConfiguredBaud(SLAVE_PORT1_BAUD_HIGH_OFFSET);
-1818   1          port1_parity = (uint8_t)slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET];
-1819   1          port1_slave_id = (uint8_t)slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
-1820   1          port2_baud_rate = RS485_ReadConfiguredBaud(SLAVE_PORT2_BAUD_HIGH_OFFSET);
-1821   1          port2_parity = (uint8_t)slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET];
-1822   1          meter_slave_id = (uint8_t)slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
-1823   1          RS485_ConfigurePort1Uart();
-1824   1          RS485_ConfigurePort2Uart();
-1825   1          master_waiting = 0;
-1826   1          master_timer_ms = MASTER_POLL_INTERVAL_MS;
-1827   1          master_timeout_ms = 0;
-1828   1          EA = 1;
-1829   1      }
-1830          
-1831          void RS485_Poll(void)
-1832          {
-1833   1          uint8_t frame_length;
-1834   1          uint8_t parity_error;
-1835   1          uint8_t global_interrupt_enabled;
-1836   1          uint8_t index;
-1837   1      
-1838   1          SFRS = 0;
-1839   1          slave_holding_registers[TAMPER_STATUS_OFFSET] =
-1840   1              Board_GetTamperStatus();
-1841   1          if (energy_meter_poll_count != 0xFFFF)
-1842   1          {
-1843   2              energy_meter_poll_count++;
-1844   2          }
-1845   1          if (port2_rx_length != 0 && port2_silence_ms >= RTU_FRAME_GAP_MS)
-1846   1          {
-1847   2              global_interrupt_enabled = EA;
-1848   2              EA = 0;
-1849   2              frame_length = port2_rx_length;
-1850   2              parity_error = port2_rx_parity_error;
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 31  
+1789   2              s_energy_meter_registers[index] = 0;
+1790   2              meter_eeprom_last_saved[index] = 0;
+1791   2          }
+1792   1          for (index = 0; index < SLAVE_REGISTER_COUNT; index++)
+1793   1          {
+1794   2              slave_holding_registers[index] = 0;
+1795   2          }
+1796   1          RS485_SetDefaultCommunicationRegisters();
+1797   1          for (index = 0; index < SLAVE_RELAY_COUNT; index++)
+1798   1          {
+1799   2              slave_relay_states[index] = 0;
+1800   2              relay_state_known[index] = 0;
+1801   2          }
+1802   1          energy_meter_connected = 0;
+1803   1          energy_meter_data_valid = 0;
+1804   1          energy_meter_successful_responses = 0;
+1805   1          energy_meter_master_state = 0;
+1806   1          energy_meter_poll_count = 0;
+1807   1          energy_meter_request_count = 0;
+1808   1          energy_meter_last_error = ENERGY_METER_ERROR_NONE;
+1809   1          energy_meter_timeout_count = 0;
+1810   1          energy_meter_parity_error_count = 0;
+1811   1          energy_meter_invalid_frame_count = 0;
+1812   1          energy_meter_last_exception = 0;
+1813   1          port1_rx_byte_count = 0;
+1814   1          port1_parity_error_count = 0;
+1815   1          port1_valid_request_count = 0;
+1816   1          port1_response_count = 0;
+1817   1          port1_bad_crc_count = 0;
+1818   1          port1_wrong_address_count = 0;
+1819   1          port1_last_frame_length = 0;
+1820   1          for (index = 0; index < 8; index++)
+1821   1          {
+1822   2              port1_last_frame[index] = 0;
+1823   2          }
+1824   1          port1_rx_length = 0;
+1825   1          port2_rx_length = 0;
+1826   1          port1_silence_ms = 0;
+1827   1          port2_silence_ms = 0;
+1828   1          port1_rx_parity_error = 0;
+1829   1          port2_rx_parity_error = 0;
+1830   1          meter_eeprom_present = 0;
+1831   1          meter_eeprom_loaded = 0;
+1832   1          meter_eeprom_last_error = 0;
+1833   1          meter_eeprom_save_count = 0;
+1834   1          meter_eeprom_save_pending = 0;
+1835   1          meter_eeprom_has_saved_record = 0;
+1836   1          meter_eeprom_save_timer_ms = 0;
+1837   1          prepaid_save_pending = 0;
+1838   1          prepaid_save_timer_ms = 0;
+1839   1          prepaid_ui_events = 0;
+1840   1          prepaid_relay_sync_pending = 0;
+1841   1          comm_config_pending = 0;
+1842   1          MeterEeprom_Init();
+1843   1          MeterEeprom_Load();
+1844   1          CommConfig_Load();
+1845   1          PrepaidEeprom_Load();
+1846   1          port1_baud_rate = RS485_ReadConfiguredBaud(SLAVE_PORT1_BAUD_HIGH_OFFSET);
+1847   1          port1_parity = (uint8_t)slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET];
+1848   1          port1_slave_id = (uint8_t)slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
+1849   1          port2_baud_rate = RS485_ReadConfiguredBaud(SLAVE_PORT2_BAUD_HIGH_OFFSET);
+1850   1          port2_parity = (uint8_t)slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET];
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 31  
 
-1851   2              port2_rx_length = 0;
-1852   2              port2_rx_parity_error = 0;
-1853   2              EA = global_interrupt_enabled;
-1854   2              if (!parity_error)
-1855   2              {
-1856   3                  RS485_HandleMeterResponse(frame_length);
-1857   3              }
-1858   2              else
-1859   2              {
-1860   3                  energy_meter_last_error = ENERGY_METER_ERROR_PARITY;
-1861   3                  if (energy_meter_parity_error_count != 0xFFFF)
-1862   3                  {
-1863   4                      energy_meter_parity_error_count++;
-1864   4                  }
-1865   3              }
-1866   2          }
-1867   1          if (port1_rx_length != 0 && port1_silence_ms >= RTU_FRAME_GAP_MS)
-1868   1          {
-1869   2              global_interrupt_enabled = EA;
-1870   2              EA = 0;
-1871   2              frame_length = port1_rx_length;
-1872   2              parity_error = port1_rx_parity_error;
-1873   2              port1_rx_length = 0;
-1874   2              port1_rx_parity_error = 0;
-1875   2              port1_last_frame_length = frame_length;
-1876   2              for (index = 0; index < frame_length && index < 8; index++)
-1877   2              {
-1878   3                  port1_last_frame[index] = port1_rx_buffer[index];
-1879   3              }
-1880   2              EA = global_interrupt_enabled;
-1881   2              if (!parity_error)
-1882   2              {
-1883   3                  Modbus_HandleSlaveFrame(frame_length);
-1884   3                  /* Apply configuration only after the write response used old settings. */
-1885   3                  RS485_ApplyCommunicationConfig();
+1851   1          meter_slave_id = (uint8_t)slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
+1852   1          RS485_ConfigurePort1Uart();
+1853   1          RS485_ConfigurePort2Uart();
+1854   1          master_waiting = 0;
+1855   1          master_timer_ms = MASTER_POLL_INTERVAL_MS;
+1856   1          master_timeout_ms = 0;
+1857   1          EA = 1;
+1858   1      }
+1859          
+1860          void RS485_Poll(void)
+1861          {
+1862   1          uint8_t frame_length;
+1863   1          uint8_t parity_error;
+1864   1          uint8_t global_interrupt_enabled;
+1865   1          uint8_t index;
+1866   1      
+1867   1          SFRS = 0;
+1868   1          slave_holding_registers[TAMPER_STATUS_OFFSET] =
+1869   1              Board_GetTamperStatus();
+1870   1          if (energy_meter_poll_count != 0xFFFF)
+1871   1          {
+1872   2              energy_meter_poll_count++;
+1873   2          }
+1874   1          if (port2_rx_length != 0 && port2_silence_ms >= RTU_FRAME_GAP_MS)
+1875   1          {
+1876   2              global_interrupt_enabled = EA;
+1877   2              EA = 0;
+1878   2              frame_length = port2_rx_length;
+1879   2              parity_error = port2_rx_parity_error;
+1880   2              port2_rx_length = 0;
+1881   2              port2_rx_parity_error = 0;
+1882   2              EA = global_interrupt_enabled;
+1883   2              if (!parity_error)
+1884   2              {
+1885   3                  RS485_HandleMeterResponse(frame_length);
 1886   3              }
-1887   2          }
-1888   1      
-1889   1          /* Apply balance/override relay changes after the Modbus response. */
-1890   1          Prepaid_ServiceBalanceRelays();
-1891   1      
-1892   1          if (master_waiting)
-1893   1          {
-1894   2              if (master_timeout_ms < MASTER_TIMEOUT_MS)
-1895   2              {
-1896   3                  master_timeout_ms++;
-1897   3              }
-1898   2              else
-1899   2              {
-1900   3                  master_waiting = 0;
-1901   3                  energy_meter_master_state = 0;
-1902   3                  port2_rx_length = 0;
-1903   3                  port2_rx_parity_error = 0;
-1904   3                  energy_meter_connected = 0;
-1905   3                  energy_meter_data_valid = 0;
-1906   3                  energy_meter_last_error = ENERGY_METER_ERROR_TIMEOUT;
-1907   3                  if (energy_meter_timeout_count != 0xFFFF)
-1908   3                  {
-1909   4                      energy_meter_timeout_count++;
-1910   4                  }
-1911   3                  RS485_ClearMeterRegisters();
-1912   3              }
-C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/21/2026 16:11:22 PAGE 32  
+1887   2              else
+1888   2              {
+1889   3                  energy_meter_last_error = ENERGY_METER_ERROR_PARITY;
+1890   3                  if (energy_meter_parity_error_count != 0xFFFF)
+1891   3                  {
+1892   4                      energy_meter_parity_error_count++;
+1893   4                  }
+1894   3              }
+1895   2          }
+1896   1          if (port1_rx_length != 0 && port1_silence_ms >= RTU_FRAME_GAP_MS)
+1897   1          {
+1898   2              global_interrupt_enabled = EA;
+1899   2              EA = 0;
+1900   2              frame_length = port1_rx_length;
+1901   2              parity_error = port1_rx_parity_error;
+1902   2              port1_rx_length = 0;
+1903   2              port1_rx_parity_error = 0;
+1904   2              port1_last_frame_length = frame_length;
+1905   2              for (index = 0; index < frame_length && index < 8; index++)
+1906   2              {
+1907   3                  port1_last_frame[index] = port1_rx_buffer[index];
+1908   3              }
+1909   2              EA = global_interrupt_enabled;
+1910   2              if (!parity_error)
+1911   2              {
+1912   3                  Modbus_HandleSlaveFrame(frame_length);
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 32  
 
-1913   2          }
-1914   1          else if (master_timer_ms < MASTER_POLL_INTERVAL_MS)
-1915   1          {
-1916   2              master_timer_ms++;
-1917   2          }
-1918   1          else
-1919   1          {
-1920   2              master_timer_ms = 0;
-1921   2              RS485_StartMeterRead();
-1922   2          }
-1923   1      
-1924   1          if (port1_silence_ms < RTU_FRAME_GAP_MS)
-1925   1          {
-1926   2              port1_silence_ms++;
-1927   2          }
-1928   1          if (port2_silence_ms < RTU_FRAME_GAP_MS)
-1929   1          {
-1930   2              port2_silence_ms++;
-1931   2          }
-1932   1          if (meter_eeprom_save_timer_ms < METER_EEPROM_SAVE_INTERVAL_MS)
-1933   1          {
-1934   2              meter_eeprom_save_timer_ms++;
-1935   2          }
-1936   1          if (prepaid_save_timer_ms < PREPAID_SAVE_DELAY_MS)
-1937   1          {
-1938   2              prepaid_save_timer_ms++;
-1939   2          }
-1940   1          MeterEeprom_Service();
-1941   1          PrepaidEeprom_Service();
-1942   1      }
-1943          
+1913   3                  /* Apply configuration only after the write response used old settings. */
+1914   3                  RS485_ApplyCommunicationConfig();
+1915   3              }
+1916   2          }
+1917   1      
+1918   1          /* Apply balance/override relay changes after the Modbus response. */
+1919   1          Prepaid_ServiceBalanceRelays();
+1920   1      
+1921   1          if (master_waiting)
+1922   1          {
+1923   2              if (master_timeout_ms < MASTER_TIMEOUT_MS)
+1924   2              {
+1925   3                  master_timeout_ms++;
+1926   3              }
+1927   2              else
+1928   2              {
+1929   3                  master_waiting = 0;
+1930   3                  energy_meter_master_state = 0;
+1931   3                  port2_rx_length = 0;
+1932   3                  port2_rx_parity_error = 0;
+1933   3                  energy_meter_connected = 0;
+1934   3                  energy_meter_data_valid = 0;
+1935   3                  energy_meter_last_error = ENERGY_METER_ERROR_TIMEOUT;
+1936   3                  if (energy_meter_timeout_count != 0xFFFF)
+1937   3                  {
+1938   4                      energy_meter_timeout_count++;
+1939   4                  }
+1940   3                  RS485_ClearMeterRegisters();
+1941   3              }
+1942   2          }
+1943   1          else if (master_timer_ms < MASTER_POLL_INTERVAL_MS)
+1944   1          {
+1945   2              master_timer_ms++;
+1946   2          }
+1947   1          else
+1948   1          {
+1949   2              master_timer_ms = 0;
+1950   2              RS485_StartMeterRead();
+1951   2          }
+1952   1      
+1953   1          if (port1_silence_ms < RTU_FRAME_GAP_MS)
+1954   1          {
+1955   2              port1_silence_ms++;
+1956   2          }
+1957   1          if (port2_silence_ms < RTU_FRAME_GAP_MS)
+1958   1          {
+1959   2              port2_silence_ms++;
+1960   2          }
+1961   1          if (meter_eeprom_save_timer_ms < METER_EEPROM_SAVE_INTERVAL_MS)
+1962   1          {
+1963   2              meter_eeprom_save_timer_ms++;
+1964   2          }
+1965   1          if (prepaid_save_timer_ms < PREPAID_SAVE_DELAY_MS)
+1966   1          {
+1967   2              prepaid_save_timer_ms++;
+1968   2          }
+1969   1          MeterEeprom_Service();
+1970   1          PrepaidEeprom_Service();
+1971   1      }
+1972          
 
+
+C51 COMPILER V9.60.0.0   RS485_TEST                                                        10/23/2026 11:18:11 PAGE 33  
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =  11042    ----
+   CODE SIZE        =  11184    ----
    CONSTANT SIZE    =   ----    ----
-   XDATA SIZE       =    790     116
+   XDATA SIZE       =   1158     117
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
    IDATA SIZE       =   ----    ----

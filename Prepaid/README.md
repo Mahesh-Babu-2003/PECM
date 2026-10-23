@@ -1,8 +1,9 @@
 # PREPAY_V0 Modbus energy bridge
 
 This Keil C51/uVision firmware for the MS51PC0AE polls an energy meter on
-RS-485 port 2 and serves 50 holding registers as a Modbus RTU slave on RS-485
-port 1. It also controls three latching relays and exposes independent
+RS-485 port 2 and serves the controller's 50-register map plus a 50-register
+meter mirror as a Modbus RTU slave on RS-485 port 1. It also controls three
+latching relays and exposes independent
 communication settings for both RS-485 ports.
 The onboard 16x2 LCD, driven through 74HC595 U3, cycles through prepaid status,
 word-swapped meter values, and the PCF8563 RTC date and time.
@@ -11,37 +12,40 @@ word-swapped meter values, and the PCF8563 RTC date and time.
 
 - Default energy meter settings on port 2: slave ID `4`, `9600 baud`, `8E1`.
 - Default controller slave settings on port 1: ID `1`, `9600 baud`, `8E1`.
-- The meter poll starts at protocol offset `0` and requests 4 registers.
-- The slave map supports holding registers `40001` through `40050` (zero-based
-  protocol offsets `0` through `49`). `40001` through `40004` mirror the four
-  meter registers and are read-only. The three relay controls immediately
-  follow at `40005`, `40006`, and `40007` for relays 1, 2, and 3. Write `0` for
+- The meter poll starts at protocol offset `0` and requests 50 registers.
+- The controller map supports holding registers `40001` through `40050`
+  (zero-based protocol offsets `0` through `49`). The three relay controls start
+  at `40001`, `40002`, and `40003` for relays 1, 2, and 3. Write `0` for
   OFF or `1` for ON using function `06`; function `03` reads back the commanded
   state. Function `16` (`0x10`, Write Multiple Registers) can also write a
   contiguous block, including relay commands.
-- Communication settings follow the meter and relay registers. Configure them
+- The meter's 50 holding-register values are exposed read-only at `40201`
+  through `40250` (zero-based protocol offsets `200` through `249`). Read them
+  with function `03`; writes to this range are rejected. Values retain the last
+  successful reading, including values restored from the onboard EEPROM.
+- Communication settings follow the relay registers. Configure them
   by writing the port 1 slave's holding registers:
 
   | Holding register | Meaning | Values |
   | --- | --- | --- |
-  | `40008` | Port 1 baud, high 16 bits | 32-bit unsigned baud value, high word first |
-  | `40009` | Port 1 baud, low 16 bits | Supported baud values listed below |
-  | `40010` | Port 1 parity | `0` = none, `1` = even, `2` = odd |
-  | `40011` | Port 1 slave ID | `1`–`247` |
-  | `40012` | Port 2 baud, high 16 bits | 32-bit unsigned baud value, high word first |
-  | `40013` | Port 2 baud, low 16 bits | Supported baud values listed below |
-  | `40014` | Port 2 parity | `0` = none, `1` = even, `2` = odd |
-  | `40015` | Port 2 meter slave ID | `1`–`247` |
+  | `40004` | Port 1 baud, high 16 bits | 32-bit unsigned baud value, high word first |
+  | `40005` | Port 1 baud, low 16 bits | Supported baud values listed below |
+  | `40006` | Port 1 parity | `0` = none, `1` = even, `2` = odd |
+  | `40007` | Port 1 slave ID | `1`–`247` |
+  | `40008` | Port 2 baud, high 16 bits | 32-bit unsigned baud value, high word first |
+  | `40009` | Port 2 baud, low 16 bits | Supported baud values listed below |
+  | `40010` | Port 2 parity | `0` = none, `1` = even, `2` = odd |
+  | `40011` | Port 2 meter slave ID | `1`–`247` |
 
   Read the current settings with Modbus function `03` (Read Holding Registers),
-  starting at `40008` for eight registers (zero-based PDU offset `7`, quantity
+  starting at `40004` for eight registers (zero-based PDU offset `3`, quantity
   `8`). The reply reports the active baud, parity, and slave IDs for both ports;
   a baud value is returned high word first. If a baud change is being written
   one word at a time, reads continue to report the active rate until the new
   high/low pair is valid and applied.
 
   Supported baud rates are `4800`, `9600`, `14400`, `19200`, `38400`,
-  `56000`, `57600`, and `115200`. Write `40008`/`40009` or `40012`/`40013`
+  `56000`, `57600`, and `115200`. Write `40004`/`40005` or `40008`/`40009`
   together with function `16` (`0x10`) when setting a two-word baud value. For example,
   `115200` is high word `1`, low word `49664` (`0xC200`). A low baud value
   such as `9600` is high word `0`, low word `9600`. For function `06`, write
@@ -50,57 +54,58 @@ word-swapped meter values, and the PCF8563 RTC date and time.
   with the current connection settings before the new settings take effect.
   Valid settings are saved with a CRC in the AT24C64 EEPROM starting at address
   `0x0060` and restored at startup. Prepaid settings and balance data in
-  `40016`–`40030` are saved separately in the AT24C64 EEPROM.
+  `40012`–`40026` are saved separately in the AT24C64 EEPROM.
 - Prepaid holding-register map (the addresses below are Modbus register labels;
   use the matching zero-based protocol offsets in masters that request offsets):
 
   | Holding register(s) | Meaning | Access and format |
   | --- | --- | --- |
-  | `40016`–`40020` | Company name | Read/write, up to 10 ASCII characters, two per register, high byte first; default `PEMC` |
-  | `40021` | Recharge input / remaining balance | Write an unsigned 16-bit total recharge amount; reads return the signed 16-bit calculated balance |
-  | `40022` | Mains unit rate | Read/write unsigned integer |
-  | `40023` | DG unit rate | Read/write unsigned integer |
-  | `40024` | Solar unit rate | Read/write unsigned integer |
-  | `40025` | Low-balance threshold | Read/write unsigned integer |
-  | `40026` | Low-balance alert | Read-only: `1` when balance is negative or at/below the threshold; otherwise `0` |
-  | `40027` | Backlight timeout | Read/write seconds; `0` keeps the backlight on |
-  | `40028` | Mains cumulative consumption | Read/write unsigned integer total |
-  | `40029` | DG cumulative consumption | Read/write unsigned integer total |
-  | `40030` | Solar cumulative consumption | Read/write unsigned integer total |
-  | `40031` | BMS relay override | Read/write: `0` = automatic balance control; `1` = force all relays on |
-  | `40032` | Tamper status (SW4) | Read-only: `0` = pressed/not tampered; `1` = released/tampered |
-  | `40033`–`40050` | Reserved | — |
+  | `40012`–`40016` | Company name | Read/write, up to 10 ASCII characters, two per register, high byte first; default `PEMC` |
+  | `40017` | Recharge input / remaining balance | Write an unsigned 16-bit total recharge amount; reads return the signed 16-bit calculated balance |
+  | `40018` | Mains unit rate | Read/write unsigned integer |
+  | `40019` | DG unit rate | Read/write unsigned integer |
+  | `40020` | Solar unit rate | Read/write unsigned integer |
+  | `40021` | Low-balance threshold | Read/write unsigned integer |
+  | `40022` | Low-balance alert | Read-only: `1` when balance is negative or at/below the threshold; otherwise `0` |
+  | `40023` | Backlight timeout | Read/write seconds; `0` keeps the backlight on |
+  | `40024` | Mains cumulative consumption | Read/write unsigned integer total |
+  | `40025` | DG cumulative consumption | Read/write unsigned integer total |
+  | `40026` | Solar cumulative consumption | Read/write unsigned integer total |
+  | `40027` | BMS relay override | Read/write: `0` = automatic balance control; `1` = force all relays on |
+  | `40028` | Tamper status (SW4) | Read-only: `0` = pressed/not tampered; `1` = released/tampered |
+  | `40029`–`40050` | Reserved | — |
 
   The balance is calculated as `total recharge amount - (Mains cumulative
   consumption × Mains unit rate + DG cumulative consumption × DG unit rate +
   Solar cumulative consumption × Solar unit rate)`. The result is negative
   when calculated consumption cost exceeds the total recharge amount. Write
-  the total recharge amount to `40021`, and the firmware returns the calculated
-  remaining balance in that same register. Writes to `40021`, unit-rate writes,
+  the total recharge amount to `40017`, and the firmware returns the calculated
+  remaining balance in that same register. Writes to `40017`, unit-rate writes,
   and cumulative-consumption writes trigger recalculation. The result is signed
   16-bit, clamped to `-32768` through `32767`; configure Modscan to display
-  `40021` as signed 16-bit to see negative balances. Rates, consumption, and
+  `40017` as signed 16-bit to see negative balances. Rates, consumption, and
   recharge input use unsigned integer values without decimal scaling. The
   low-balance alert is `1` when the balance is negative or at or below the
   configured threshold, otherwise `0`. Relay control follows the calculated
   balance sign: a positive balance turns all three relays on, while zero or a
   negative balance turns them off and blocks relay-on commands. Write `1` to
-  `40031` to force all relays on even when the balance is zero or negative;
+  `40027` to force all relays on even when the balance is zero or negative;
   write `0` to restore automatic balance control. The override is not saved
   across a restart. SW4 is the active-low tamper input on P2.4: a pressed switch
   reports `0` (not tampered), and a released switch reports `1` (tampered) in
-  `40032`.
+  `40028`.
 - The schematic uses latching relay SET/RESET coils. Firmware pulses the
   selected coil for 120 ms. Software relay states start at zero and update when
   commanded. The board has no relay contact feedback, so readback is not a
   measurement of the physical contact. At startup, firmware synchronizes the
   relays with the calculated balance and override register.
 - The LCD shows two IEEE-754 floats with two decimal places: `F1` combines
-  `40002` as the high 16-bit word with `40001` as the low word; `F2` combines
-  `40004` high with `40003` low. This is the 16-bit word-swapped format. The
-  first four retained meter values are also the values served at `40001` through
-  `40004`. Values loaded from the onboard EEPROM are shown at startup; without
-  a saved value, the display starts at zero.
+  meter value 2 as the high 16-bit word with meter value 1 as the low word; `F2`
+  combines meter value 4 high with meter value 3 low. This is the 16-bit
+  word-swapped format. The display reads the retained meter array directly;
+  meter values are served at `40201` through `40250`. Values loaded from the
+  onboard EEPROM are shown at startup; without a saved value, the
+  display starts at zero.
 - The LCD rotates every three seconds through company name, remaining
   balance/alert, Mains/DG/Solar load states, rates, meter values, and RTC. The
   RTC page shows `DATE: DD:MM:YYYY` and `TIME: HH:MM:SS`; an invalid RTC read
@@ -121,16 +126,16 @@ word-swapped meter values, and the PCF8563 RTC date and time.
   seconds to save the current valid RTC date/time to the AT24C64 EEPROM. A
   success/failure message is shown and a successful save gives two confirmation
   beeps. The RTC snapshot uses EEPROM address `0x0040`, separate from the meter
-  record at `0x0020`, and is read back to verify the save. If the RTC is invalid
+  record at `0x0100`, and is read back to verify the save. If the RTC is invalid
   at startup, firmware restores the saved snapshot from EEPROM before entering
   the date editor. This restores the last saved time; it cannot advance the
   clock during an outage.
-- A failed or timed-out meter poll clears the live receive array, while the
-  four slave-served meter values remain at the last successfully received or
-  restored values. The additional holding registers are unaffected.
+- A failed or timed-out meter poll clears the live receive array, while the 50
+  values served at `40201` through `40250` remain at their last successfully
+  received or restored values. The controller registers are unaffected.
 - The LCD is driven by onboard 74HC595 U3: serial data is on P2.1, shift clock
   on P2.2, and latch on P2.3. The global `back_light_on` variable controls its
-  active-low PNP backlight switch: `0` is off and `1` is on. Register `40027`
+  active-low PNP backlight switch: `0` is off and `1` is on. Register `40023`
   controls the idle timeout; zero keeps the backlight on. Local button presses
   and changed Modbus values wake it. The LCD data and RS bits are set while
   Enable is low before Enable is pulsed.
@@ -157,11 +162,12 @@ with correct polarity to keep the clock running when the main supply is off.
 3. Join signal grounds when available. Do not connect the meter supply to A/B.
 4. Configure the meter for ID `4`, `9600 8E1`; configure the PC master for
   controller ID `1`, `9600 8E1`, and function `03` (Read Holding Registers).
-  Read `40001` through `40050` for the data map. Use function `06` to write
-  `40005` through `40007` with `0` or `1` to operate relays 1 through 3 when
-  balance control permits; write `1` to `40031` to force all three on. Read
-  tamper status at `40032`. Use
-  `40008` through `40015` to configure both UARTs, then reconnect the PC master
+  Read `40001` through `40050` for controller data and `40201` through `40250`
+  for meter readings. Use function `06` to write
+  `40001` through `40003` with `0` or `1` to operate relays 1 through 3 when
+  balance control permits; write `1` to `40027` to force all three on. Read
+  tamper status at `40028`. Use
+  `40004` through `40011` to configure both UARTs, then reconnect the PC master
   using the new port 1 settings.
 5. Keep each bus daisy-chained and terminate only its physical ends.
 
@@ -175,13 +181,14 @@ and slave state:
 - `energy_meter_data_valid`: `1` when the live receive array has a valid
   response; otherwise `0`.
 - `energy_meter_successful_responses`: increments for each valid meter response.
-- `energy_meter_registers[0]` through `[3]`: latest raw meter values.
+- `energy_meter_registers[0]` through `[49]`: latest raw meter values.
+- `s_energy_meter_registers[0]` through `[49]`: retained last-good meter
+  values served at holding registers `40201` through `40250`.
 - `slave_holding_registers[0]` through `[49]`: holding registers 40001–40050;
-  indices 0–3 mirror the meter, indices 4–6 are relay commands, indices 7–14
-  configure port 1 and port 2 baud/parity/IDs, and indices 15–49 follow the
-  prepaid map above.
+  indices 0–2 are relay commands, indices 3–10 configure port 1 and port 2
+  baud/parity/IDs, and indices 11–27 follow the prepaid map above.
 - `slave_relay_states[0]` through `[2]`: commanded states for registers
-  40005–40007.
+  40001–40003.
 - `back_light_on`: `0` turns the LCD backlight off; `1` turns it on. Changes
   while running take effect immediately. `BACK_LIGHT_OFF` and `BACK_LIGHT_ON`
   are provided as named values.
