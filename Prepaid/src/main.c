@@ -5,10 +5,6 @@
 #include "lcd_595.h"
 #include "rs485_test.h"
 
-#define RTC_EDIT_TIMEOUT_TICKS 30000
-#define RTC_EDIT_DIGIT_COUNT   14
-#define RTC_SAVE_MESSAGE_TICKS 2000
-#define RTC_KEY_COMBO_DELAY_TICKS 100
 #define RS485_INFO_PAGE_TICKS 3000
 #define LCD_PAGE_COMPANY 0
 #define LCD_PAGE_BALANCE 1
@@ -16,26 +12,201 @@
 #define LCD_PAGE_RATES   3
 #define LCD_PAGE_METER   4
 #define LCD_PAGE_RTC     5
-#define LCD_PAGE_COUNT   6
+#define LCD_PAGE_TAMPER  6
+#define LCD_PAGE_BILLING 7
+#define LCD_PAGE_COUNT   8
+#define BILLING_PARAMETER_COUNT 16
+#define RTC_SWITCH_TRIPLE_TAP_WINDOW_TICKS 2500
+#define LOW_BALANCE_BEEP_REPEAT_HALF_SECOND_UNITS 60
+#define LOW_BALANCE_BEEP_BURST_HALF_SECOND_UNITS 5
+
+#define LOW_BALANCE_BUZZER_IDLE       0
+#define LOW_BALANCE_BUZZER_ON         1
+#define LOW_BALANCE_BUZZER_OFF        2
+#define LOW_BALANCE_BUZZER_PAUSE      3
 
 static uint16_t rtc_poll_timer;
 static uint16_t screen_switch_timer;
-static uint16_t rtc_edit_idle_timer;
 static uint8_t lcd_values_initialized;
 static uint8_t lcd_page;
-static uint8_t rtc_edit_active;
-static uint8_t rtc_selected_digit;
 static uint8_t backlight_applied;
 static uint16_t backlight_idle_seconds;
 static uint16_t backlight_idle_ms;
-static uint8_t rtc_save_message;
-static uint16_t rtc_save_message_ticks;
 static uint16_t lcd_last_float_registers[4];
-static uint8_t pending_rtc_switch_events;
-static uint16_t pending_rtc_switch_ticks;
 static uint8_t rs485_info_active;
 static uint8_t rs485_info_port;
 static uint16_t rs485_info_page_ticks;
+static uint8_t low_balance_buzzer_state;
+static uint8_t low_balance_beep_count;
+static uint16_t low_balance_buzzer_timer;
+static uint8_t billing_edit_active;
+static uint8_t billing_parameter_index;
+static uint16_t billing_recharge_entry;
+static uint8_t billing_recharge_error;
+static uint8_t rtc_view_locked;
+static uint8_t rtc_view_tap_count;
+static uint16_t rtc_view_tap_timer;
+/* Main-loop ticks per second; change this to adjust all buzzer timings. */
+static uint16_t buzzer_second_setting_ticks = 1000;
+
+static void UpdateLowBalanceBuzzer(void)
+{
+    if (slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] == 0)
+    {
+        low_balance_buzzer_state = LOW_BALANCE_BUZZER_IDLE;
+        low_balance_beep_count = 0;
+        low_balance_buzzer_timer = 0;
+        Board_SetBuzzer(0);
+        return;
+    }
+
+    if (low_balance_buzzer_state == LOW_BALANCE_BUZZER_IDLE)
+    {
+        low_balance_buzzer_state = LOW_BALANCE_BUZZER_ON;
+        low_balance_beep_count = 0;
+        low_balance_buzzer_timer =
+            (uint16_t)(buzzer_second_setting_ticks / 2);
+        Board_SetBuzzer(1);
+        return;
+    }
+
+    Board_SetBuzzer((uint8_t)(low_balance_buzzer_state ==
+        LOW_BALANCE_BUZZER_ON));
+    if (low_balance_buzzer_timer != 0)
+    {
+        low_balance_buzzer_timer--;
+        if (low_balance_buzzer_timer != 0)
+        {
+            return;
+        }
+    }
+
+    if (low_balance_buzzer_state == LOW_BALANCE_BUZZER_ON)
+    {
+        low_balance_beep_count++;
+        Board_SetBuzzer(0);
+        if (low_balance_beep_count >= 3)
+        {
+            low_balance_buzzer_state = LOW_BALANCE_BUZZER_PAUSE;
+            low_balance_buzzer_timer = (uint16_t)(
+                (buzzer_second_setting_ticks / 2) *
+                (LOW_BALANCE_BEEP_REPEAT_HALF_SECOND_UNITS -
+                    LOW_BALANCE_BEEP_BURST_HALF_SECOND_UNITS));
+        }
+        else
+        {
+            low_balance_buzzer_state = LOW_BALANCE_BUZZER_OFF;
+            low_balance_buzzer_timer =
+                (uint16_t)(buzzer_second_setting_ticks / 2);
+        }
+    }
+    else if (low_balance_buzzer_state == LOW_BALANCE_BUZZER_OFF)
+    {
+        low_balance_buzzer_state = LOW_BALANCE_BUZZER_ON;
+        low_balance_buzzer_timer =
+            (uint16_t)(buzzer_second_setting_ticks / 2);
+        Board_SetBuzzer(1);
+    }
+    else
+    {
+        low_balance_buzzer_state = LOW_BALANCE_BUZZER_ON;
+        low_balance_beep_count = 0;
+        low_balance_buzzer_timer =
+            (uint16_t)(buzzer_second_setting_ticks / 2);
+        Board_SetBuzzer(1);
+    }
+}
+
+static uint16_t BillingParameterOffset(uint8_t index)
+{
+    switch (index)
+    {
+        case 0: return BALANCE_OFFSET;
+        case 1: return MAIN_KWH_RATE_OFFSET;
+        case 2: return MAIN_KVAH_RATE_OFFSET;
+        case 3: return DG_KWH_RATE_OFFSET;
+        case 4: return DG_KVAH_RATE_OFFSET;
+        case 5: return SOLAR_KWH_RATE_OFFSET;
+        case 6: return SOLAR_KVAH_RATE_OFFSET;
+        case 7: return LOW_BALANCE_THRESHOLD_OFFSET;
+        case 8: return BACKLIGHT_TIMEOUT_OFFSET;
+        case 9: return MAIN_CONSUMPTION_OFFSET;
+        case 10: return DG_CONSUMPTION_OFFSET;
+        case 11: return SOLAR_CONSUMPTION_OFFSET;
+        case 12: return BILLING_PARAMETER_OFFSET;
+        case 13: return LOAD_LIMIT_OFFSET;
+        case 14: return TIME_LIMIT_OFFSET;
+        default: return DISCONNECT_MODE_OFFSET;
+    }
+}
+
+static void Billing_AdjustSelectedParameter(uint8_t increase)
+{
+    uint16_t offset;
+    uint16_t value;
+
+    if (billing_parameter_index == 0)
+    {
+        if (increase)
+        {
+            if (billing_recharge_entry < 0xFFFF)
+            {
+                billing_recharge_entry++;
+            }
+        }
+        else if (billing_recharge_entry != 0)
+        {
+            billing_recharge_entry--;
+        }
+        billing_recharge_error = 0;
+        return;
+    }
+
+    offset = BillingParameterOffset(billing_parameter_index);
+    value = RS485_GetBillingParameterValue(offset);
+    if (offset == BILLING_PARAMETER_OFFSET)
+    {
+        value = increase ? (uint16_t)((value + 1) % 6) :
+            (uint16_t)((value == 0) ? 5 : (value - 1));
+        RS485_SetBillingParameter(offset, value);
+        return;
+    }
+    if (offset == DISCONNECT_MODE_OFFSET)
+    {
+        value = (uint16_t)((value == 0) ? 1 : 0);
+        RS485_SetBillingParameter(offset, value);
+        return;
+    }
+    if (increase)
+    {
+        if (value < 0xFFFF)
+        {
+            value++;
+        }
+    }
+    else if (value != 0)
+    {
+        value--;
+    }
+    RS485_SetBillingParameter(offset, value);
+}
+
+static uint8_t Billing_ApplyPendingRecharge(void)
+{
+    if (billing_recharge_entry == 0)
+    {
+        billing_recharge_error = 0;
+        return 1;
+    }
+    if (RS485_SetBillingParameter(BALANCE_OFFSET, billing_recharge_entry))
+    {
+        billing_recharge_entry = 0;
+        billing_recharge_error = 0;
+        return 1;
+    }
+    billing_recharge_error = 1;
+    return 0;
+}
 
 static uint8_t LCD_WriteUnsignedLong(uint32_t value)
 {
@@ -252,33 +423,12 @@ static void LCD_WriteFourDigits(uint16_t value)
 
 static void LCD_ShowRtc(void)
 {
-    uint8_t cursor_row;
-    uint8_t cursor_column;
-
     LCD_SetCursor(0, 0);
-    if (rtc_save_message != 0)
+    if (!rtc_datetime_valid)
     {
-        if (rtc_save_message == 1)
-        {
-            LCD_WriteText("RTC SAVE SUCCESS");
-            LCD_SetCursor(1, 0);
-            LCD_WriteText("EEPROM BACKUP   ");
-        }
-        else
-        {
-            LCD_WriteText("RTC SAVE FAILED ");
-            LCD_SetCursor(1, 0);
-            LCD_WriteText("CHECK EEPROM    ");
-        }
-        LCD_Command(0x0C);
-        return;
-    }
-
-    if (!rtc_datetime_valid && !rtc_edit_active)
-    {
-        LCD_WriteText("RTC DATA INVALID");
+        LCD_WriteText("RTC NOT SYNCED  ");
         LCD_SetCursor(1, 0);
-        LCD_WriteText("CHECK RTC SETUP ");
+        LCD_WriteText("SYNC FROM BMS   ");
         LCD_Command(0x0C);
         return;
     }
@@ -298,51 +448,7 @@ static void LCD_ShowRtc(void)
     LCD_WriteChar(':');
     LCD_WriteTwoDigits(rtc_datetime.seconds);
     LCD_WriteText("  ");
-
-    if (rtc_edit_active)
-    {
-        if (rtc_selected_digit < 8)
-        {
-            cursor_row = 0;
-            if (rtc_selected_digit < 2)
-            {
-                cursor_column = (uint8_t)(6 + rtc_selected_digit);
-            }
-            else if (rtc_selected_digit < 4)
-            {
-                cursor_column = (uint8_t)(7 + rtc_selected_digit);
-            }
-            else
-            {
-                cursor_column = (uint8_t)(8 + rtc_selected_digit);
-            }
-        }
-        else
-        {
-            uint8_t time_digit;
-
-            cursor_row = 1;
-            time_digit = (uint8_t)(rtc_selected_digit - 8);
-            if (time_digit < 2)
-            {
-                cursor_column = (uint8_t)(6 + time_digit);
-            }
-            else if (time_digit < 4)
-            {
-                cursor_column = (uint8_t)(7 + time_digit);
-            }
-            else
-            {
-                cursor_column = (uint8_t)(8 + time_digit);
-            }
-        }
-        LCD_Command(0x0F);
-        LCD_SetCursor(cursor_row, cursor_column);
-    }
-    else
-    {
-        LCD_Command(0x0C);
-    }
+    LCD_Command(0x0C);
 }
 
 static void LCD_PadLine(uint8_t row, uint8_t used_columns)
@@ -429,15 +535,163 @@ static void LCD_ShowRates(void)
     LCD_SetCursor(0, 0);
     LCD_WriteText("M:");
     used_columns = (uint8_t)(2 + LCD_WriteUnsignedLong(
-        slave_holding_registers[MAIN_RATE_OFFSET]));
+        slave_holding_registers[MAIN_KWH_RATE_OFFSET]));
     LCD_WriteText(" DG:");
     used_columns = (uint8_t)(used_columns + 4 + LCD_WriteUnsignedLong(
-        slave_holding_registers[DG_RATE_OFFSET]));
+        slave_holding_registers[DG_KWH_RATE_OFFSET]));
     LCD_PadLine(0, used_columns);
     LCD_SetCursor(1, 0);
     LCD_WriteText("SOLAR:");
     used_columns = (uint8_t)(6 + LCD_WriteUnsignedLong(
-        slave_holding_registers[SOLAR_RATE_OFFSET]));
+        slave_holding_registers[SOLAR_KWH_RATE_OFFSET]));
+    LCD_PadLine(1, used_columns);
+}
+
+static void LCD_ShowTamperEvent(void)
+{
+    uint8_t used_columns;
+
+    LCD_Command(0x0C);
+    LCD_SetCursor(0, 0);
+    LCD_WriteText("TAMPER COUNT");
+    LCD_PadLine(0, 12);
+    LCD_SetCursor(1, 0);
+    LCD_WriteText("40028: ");
+    used_columns = (uint8_t)(7 + LCD_WriteUnsignedLong(
+        slave_holding_registers[TAMPER_EVENT_OFFSET]));
+    LCD_PadLine(1, used_columns);
+}
+
+static void LCD_ShowBillingParameter(void)
+{
+    uint16_t offset;
+    uint8_t used_columns;
+
+    offset = BillingParameterOffset(billing_parameter_index);
+    LCD_Command(0x0C);
+    LCD_SetCursor(0, 0);
+    LCD_WriteChar(billing_edit_active ? '*' : ' ');
+    used_columns = 1;
+    switch (billing_parameter_index)
+    {
+        case 0:
+            if (billing_edit_active)
+            {
+                LCD_WriteText("ADD CREDIT");
+                used_columns += 10;
+            }
+            else
+            {
+                LCD_WriteText("BALANCE");
+                used_columns += 7;
+            }
+            break;
+        case 1:
+            LCD_WriteText("MAIN kWh RATE");
+            used_columns += 13;
+            break;
+        case 2:
+            LCD_WriteText("MAIN kVAh RATE");
+            used_columns += 14;
+            break;
+        case 3:
+            LCD_WriteText("DG kWh RATE");
+            used_columns += 12;
+            break;
+        case 4:
+            LCD_WriteText("DG kVAh RATE");
+            used_columns += 13;
+            break;
+        case 5:
+            LCD_WriteText("SOLAR kWh RATE");
+            used_columns += 15;
+            break;
+        case 6:
+            LCD_WriteText("SOLAR kVAh RATE");
+            used_columns += 15;
+            break;
+        case 7:
+            LCD_WriteText("LOW LIMIT");
+            used_columns += 9;
+            break;
+        case 8:
+            LCD_WriteText("BACKLIGHT SEC");
+            used_columns += 13;
+            break;
+        case 9:
+            LCD_WriteText("MAIN USE");
+            used_columns += 8;
+            break;
+        case 10:
+            LCD_WriteText("DG USE");
+            used_columns += 6;
+            break;
+        case 11:
+            LCD_WriteText("SOLAR USE");
+            used_columns += 9;
+            break;
+        case 12:
+        {
+            uint16_t billing_code;
+
+            billing_code = slave_holding_registers[BILLING_PARAMETER_OFFSET];
+            if (billing_code > 5) billing_code = 0;
+            switch (billing_code)
+            {
+                case 0: LCD_WriteText("BILL kWh"); break;
+                case 1: LCD_WriteText("BILL kVAh"); break;
+                case 2: LCD_WriteText("BILL PF"); break;
+                case 3: LCD_WriteText("BILL kW"); break;
+                case 4: LCD_WriteText("BILL kVA"); break;
+                default: LCD_WriteText("BILL kVArh"); break;
+            }
+            used_columns = 12;
+            break;
+        }
+        case 13:
+            LCD_WriteText("LOAD LIMIT");
+            used_columns += 10;
+            break;
+        case 14:
+            LCD_WriteText("TIME LIMIT");
+            used_columns += 10;
+            break;
+        default:
+            LCD_WriteText("LIMIT MODE");
+            used_columns += 10;
+            break;
+    }
+    LCD_PadLine(0, used_columns);
+
+    LCD_SetCursor(1, 0);
+    if (billing_recharge_error)
+    {
+        LCD_WriteText("TOPUP OVER LIMIT");
+        used_columns = 16;
+    }
+    else if (billing_edit_active && billing_parameter_index == 0)
+    {
+        LCD_WriteText("ADD=");
+        used_columns = (uint8_t)(4 + LCD_WriteUnsignedLong(
+            billing_recharge_entry));
+    }
+    else
+    {
+        LCD_WriteText("REG ");
+        used_columns = (uint8_t)(4 + LCD_WriteUnsignedLong(40001UL + offset));
+        LCD_WriteChar('=');
+        used_columns++;
+        if (billing_parameter_index == 0)
+        {
+            used_columns = (uint8_t)(used_columns + LCD_WriteSignedInteger(
+                (int16_t)slave_holding_registers[offset]));
+        }
+        else
+        {
+            used_columns = (uint8_t)(used_columns + LCD_WriteUnsignedLong(
+                RS485_GetBillingParameterValue(offset)));
+        }
+    }
     LCD_PadLine(1, used_columns);
 }
 
@@ -461,199 +715,15 @@ static void LCD_ShowPage(uint8_t page)
             lcd_values_initialized = 0;
             LCD_ShowSlaveRegisters();
             break;
+        case LCD_PAGE_TAMPER:
+            LCD_ShowTamperEvent();
+            break;
+        case LCD_PAGE_BILLING:
+            LCD_ShowBillingParameter();
+            break;
         default:
             LCD_ShowRtc();
             break;
-    }
-}
-
-static uint8_t RTC_IsLeapYear(uint16_t year)
-{
-    return (uint8_t)(((year % 4) == 0) &&
-        (((year % 100) != 0) || ((year % 400) == 0)));
-}
-
-static uint8_t RTC_DaysInMonth(uint16_t year, uint8_t month)
-{
-    switch (month)
-    {
-        case 2:
-            return RTC_IsLeapYear(year) ? 29 : 28;
-        case 4:
-        case 6:
-        case 9:
-        case 11:
-            return 30;
-        default:
-            return 31;
-    }
-}
-
-static uint8_t RTC_DateTimeIsValid(const RTC_DateTime *datetime)
-{
-    return (uint8_t)(datetime->year >= 2000 && datetime->year <= 2199 &&
-        datetime->month >= 1 && datetime->month <= 12 && datetime->day >= 1 &&
-        datetime->day <= RTC_DaysInMonth(datetime->year, datetime->month) &&
-        datetime->hours <= 23 && datetime->minutes <= 59 &&
-        datetime->seconds <= 59);
-}
-
-static uint8_t RTC_CalculateWeekday(uint16_t year, uint8_t month, uint8_t day)
-{
-    uint16_t century_year;
-    uint16_t century;
-    uint16_t weekday;
-
-    if (month < 3)
-    {
-        month += 12;
-        year--;
-    }
-    century_year = (uint16_t)(year % 100);
-    century = (uint16_t)(year / 100);
-    weekday = (uint16_t)((day + (13 * (month + 1)) / 5 + century_year +
-        (century_year / 4) + (century / 4) + (5 * century)) % 7);
-    return (uint8_t)((weekday + 6) % 7);
-}
-
-static uint16_t RTC_AdjustDigit(uint16_t value, uint16_t place,
-                                int8_t direction)
-{
-    uint8_t digit;
-    uint8_t changed_digit;
-
-    digit = (uint8_t)((value / place) % 10);
-    if (direction < 0)
-    {
-        changed_digit = (digit == 0) ? 9 : (uint8_t)(digit - 1);
-    }
-    else
-    {
-        changed_digit = (digit == 9) ? 0 : (uint8_t)(digit + 1);
-    }
-    return (uint16_t)(value - ((uint16_t)digit * place) +
-                      ((uint16_t)changed_digit * place));
-}
-
-static uint8_t RTC_AdjustSelectedDigit(int8_t direction)
-{
-    RTC_DateTime candidate;
-    uint8_t digit;
-
-    candidate.year = rtc_datetime.year;
-    candidate.month = rtc_datetime.month;
-    candidate.day = rtc_datetime.day;
-    candidate.weekday = rtc_datetime.weekday;
-    candidate.hours = rtc_datetime.hours;
-    candidate.minutes = rtc_datetime.minutes;
-    candidate.seconds = rtc_datetime.seconds;
-
-    digit = rtc_selected_digit;
-    if (digit < 2)
-    {
-        candidate.day = (uint8_t)RTC_AdjustDigit(candidate.day,
-            (digit == 0) ? 10 : 1, direction);
-    }
-    else if (digit < 4)
-    {
-        candidate.month = (uint8_t)RTC_AdjustDigit(candidate.month,
-            (digit == 2) ? 10 : 1, direction);
-    }
-    else if (digit < 8)
-    {
-        candidate.year = RTC_AdjustDigit(candidate.year,
-            (digit == 4) ? 1000 : ((digit == 5) ? 100 :
-            ((digit == 6) ? 10 : 1)), direction);
-    }
-    else if (digit < 10)
-    {
-        candidate.hours = (uint8_t)RTC_AdjustDigit(candidate.hours,
-            (digit == 8) ? 10 : 1, direction);
-    }
-    else if (digit < 12)
-    {
-        candidate.minutes = (uint8_t)RTC_AdjustDigit(candidate.minutes,
-            (digit == 10) ? 10 : 1, direction);
-    }
-    else
-    {
-        candidate.seconds = (uint8_t)RTC_AdjustDigit(candidate.seconds,
-            (digit == 12) ? 10 : 1, direction);
-    }
-
-    if (!RTC_DateTimeIsValid(&candidate))
-    {
-        return 0;
-    }
-    candidate.weekday = RTC_CalculateWeekday(candidate.year,
-        candidate.month, candidate.day);
-    if (!RTC_WriteDateTime(&candidate))
-    {
-        return 0;
-    }
-
-    rtc_datetime.year = candidate.year;
-    rtc_datetime.month = candidate.month;
-    rtc_datetime.day = candidate.day;
-    rtc_datetime.weekday = candidate.weekday;
-    rtc_datetime.hours = candidate.hours;
-    rtc_datetime.minutes = candidate.minutes;
-    rtc_datetime.seconds = candidate.seconds;
-    rtc_datetime_valid = 1;
-    return 1;
-}
-
-static uint8_t RTC_HandleSwitchPresses(uint8_t switch_events)
-{
-    if (switch_events == 0)
-    {
-        return 0;
-    }
-
-    lcd_page = LCD_PAGE_RTC;
-    screen_switch_timer = 0;
-    rtc_edit_idle_timer = 0;
-
-    if (switch_events & BOARD_SWITCH_1)
-    {
-        if (rtc_edit_active)
-        {
-            rtc_selected_digit++;
-            if (rtc_selected_digit >= RTC_EDIT_DIGIT_COUNT)
-            {
-                rtc_selected_digit = 0;
-            }
-        }
-        else
-        {
-            rtc_selected_digit = 0;
-        }
-        rtc_edit_active = 1;
-    }
-    else if (switch_events & BOARD_SWITCH_2)
-    {
-        rtc_edit_active = 1;
-        RTC_AdjustSelectedDigit(-1);
-    }
-    else if (switch_events & BOARD_SWITCH_3)
-    {
-        rtc_edit_active = 1;
-        RTC_AdjustSelectedDigit(1);
-    }
-    return 1;
-}
-
-static void RTC_SetDefaultEditValue(void)
-{
-    if (!rtc_datetime_valid)
-    {
-        rtc_datetime.year = 2000;
-        rtc_datetime.month = 1;
-        rtc_datetime.day = 1;
-        rtc_datetime.weekday = 6;
-        rtc_datetime.hours = 0;
-        rtc_datetime.minutes = 0;
-        rtc_datetime.seconds = 0;
     }
 }
 
@@ -677,35 +747,6 @@ static uint8_t RTC_RestoreEepromSnapshot(void)
     return 1;
 }
 
-static void RTC_SaveCurrentTimeToEeprom(void)
-{
-    RTC_DateTime snapshot;
-
-    snapshot.year = rtc_datetime.year;
-    snapshot.month = rtc_datetime.month;
-    snapshot.day = rtc_datetime.day;
-    snapshot.weekday = rtc_datetime.weekday;
-    snapshot.hours = rtc_datetime.hours;
-    snapshot.minutes = rtc_datetime.minutes;
-    snapshot.seconds = rtc_datetime.seconds;
-
-    lcd_page = LCD_PAGE_RTC;
-    screen_switch_timer = 0;
-    rtc_save_message_ticks = RTC_SAVE_MESSAGE_TICKS;
-    if (rtc_datetime_valid && RTC_SaveDateTimeToEEPROM(&snapshot))
-    {
-        rtc_save_message = 1;
-        Board_Beep(50);
-        Board_DelayMs(70);
-        Board_Beep(50);
-    }
-    else
-    {
-        rtc_save_message = 2;
-        Board_Beep(150);
-    }
-}
-
 void main(void)
 {
     uint8_t rtc_refresh_due;
@@ -715,8 +756,6 @@ void main(void)
     uint16_t backlight_timeout;
     uint8_t switch_events;
     uint8_t switch_press_events;
-    uint8_t stable_switches;
-    uint8_t deferred_switches;
 
     MODIFY_HIRC(HIRC_24);
     SFRS = 0;
@@ -728,7 +767,10 @@ void main(void)
     {
         RTC_RestoreEepromSnapshot();
     }
-    RTC_SetDefaultEditValue();
+    RS485_UpdateLiveRtcRegisters();
+    rtc_view_locked = 0;
+    rtc_view_tap_count = 0;
+    rtc_view_tap_timer = 0;
     LCD_Init();
     backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
     LCD_ShowPage(lcd_page);
@@ -746,7 +788,18 @@ void main(void)
         {
             backlight_activity = 1;
         }
-        if (prepaid_events & PREPAID_UI_EVENT_BALANCE)
+        if (prepaid_events & PREPAID_UI_EVENT_TAMPER)
+        {
+            if (billing_edit_active)
+            {
+                Billing_ApplyPendingRecharge();
+            }
+            billing_edit_active = 0;
+            lcd_page = LCD_PAGE_TAMPER;
+            screen_changed = 1;
+            Board_Beep(100);
+        }
+        else if (prepaid_events & PREPAID_UI_EVENT_BALANCE)
         {
             lcd_page = LCD_PAGE_BALANCE;
             screen_changed = 1;
@@ -766,16 +819,19 @@ void main(void)
             lcd_page = LCD_PAGE_RATES;
             screen_changed = 1;
         }
+        if (billing_edit_active)
+        {
+            lcd_page = LCD_PAGE_BILLING;
+        }
         if (screen_changed)
         {
             screen_switch_timer = 0;
-            rtc_edit_active = 0;
-            rtc_save_message = 0;
         }
         if (rtc_poll_timer >= 999)
         {
             rtc_poll_timer = 0;
             RTC_ReadDateTime(&rtc_datetime);
+            RS485_UpdateLiveRtcRegisters();
             rtc_refresh_due = 1;
         }
         else
@@ -795,86 +851,128 @@ void main(void)
             Board_Beep(35);
         }
 
-        if (switch_events & BOARD_SWITCH_2_3_LONG)
+        if (rtc_view_tap_count != 0)
         {
-            pending_rtc_switch_events = 0;
-            pending_rtc_switch_ticks = 0;
-            rs485_info_active = 1;
-            rs485_info_port = 1;
-            rs485_info_page_ticks = 0;
-            screen_switch_timer = 0;
-            rtc_edit_active = 0;
-            rtc_save_message = 0;
-            screen_changed = 1;
-        }
-
-        if (rs485_info_active)
-        {
-            pending_rtc_switch_events = 0;
-            pending_rtc_switch_ticks = 0;
-        }
-        else
-        {
-            if (switch_press_events & BOARD_SWITCH_1)
+            if (rtc_view_tap_timer < RTC_SWITCH_TRIPLE_TAP_WINDOW_TICKS)
             {
-                if (RTC_HandleSwitchPresses(BOARD_SWITCH_1))
+                rtc_view_tap_timer++;
+            }
+            if (rtc_view_tap_timer >= RTC_SWITCH_TRIPLE_TAP_WINDOW_TICKS)
+            {
+                rtc_view_tap_count = 0;
+                rtc_view_tap_timer = 0;
+            }
+        }
+        if (!rs485_info_active && !billing_edit_active)
+        {
+            if (!rtc_view_locked && lcd_page != LCD_PAGE_BILLING &&
+                (switch_press_events & BOARD_SWITCH_1))
+            {
+                if (rtc_view_tap_count < 3)
                 {
+                    rtc_view_tap_count++;
+                }
+                rtc_view_tap_timer = 0;
+                screen_switch_timer = 0;
+                if (rtc_view_tap_count >= 3)
+                {
+                    rtc_view_locked = 1;
+                    rtc_view_tap_count = 0;
+                    rtc_view_tap_timer = 0;
+                    lcd_page = LCD_PAGE_RTC;
+                    screen_switch_timer = 0;
                     screen_changed = 1;
                 }
             }
-
-            pending_rtc_switch_events |= (uint8_t)(switch_press_events &
-                (BOARD_SWITCH_2 | BOARD_SWITCH_3));
-            stable_switches = Board_GetStableSwitches();
-            if ((stable_switches & (BOARD_SWITCH_2 | BOARD_SWITCH_3)) ==
-                (BOARD_SWITCH_2 | BOARD_SWITCH_3))
+            else if (rtc_view_locked &&
+                (switch_press_events & BOARD_SWITCH_2))
             {
-                pending_rtc_switch_ticks = 0;
+                if (rtc_view_tap_count < 3)
+                {
+                    rtc_view_tap_count++;
+                }
+                rtc_view_tap_timer = 0;
+                if (rtc_view_tap_count >= 3)
+                {
+                    rtc_view_locked = 0;
+                    rtc_view_tap_count = 0;
+                    rtc_view_tap_timer = 0;
+                    screen_switch_timer = 0;
+                    screen_changed = 1;
+                }
             }
-            else if (pending_rtc_switch_events != 0)
+            else if (switch_press_events != 0)
             {
-                if (pending_rtc_switch_ticks < RTC_KEY_COMBO_DELAY_TICKS)
+                rtc_view_tap_count = 0;
+                rtc_view_tap_timer = 0;
+            }
+        }
+
+        if (switch_events & BOARD_SWITCH_2_3_LONG)
+        {
+            if (billing_edit_active)
+            {
+                if (Billing_ApplyPendingRecharge())
                 {
-                    pending_rtc_switch_ticks++;
+                    billing_edit_active = 0;
+                    lcd_page = LCD_PAGE_BILLING;
+                    screen_switch_timer = 0;
                 }
-                if (pending_rtc_switch_ticks >= RTC_KEY_COMBO_DELAY_TICKS)
-                {
-                    deferred_switches = pending_rtc_switch_events;
-                    pending_rtc_switch_events = 0;
-                    pending_rtc_switch_ticks = 0;
-                    if (RTC_HandleSwitchPresses(deferred_switches))
-                    {
-                        screen_changed = 1;
-                    }
-                }
+                screen_changed = 1;
             }
             else
             {
-                pending_rtc_switch_ticks = 0;
-            }
-
-            if (switch_events & BOARD_SWITCH_1_LONG)
-            {
-                RTC_SaveCurrentTimeToEeprom();
+                rs485_info_active = 1;
+                rs485_info_port = 1;
+                rs485_info_page_ticks = 0;
+                screen_switch_timer = 0;
                 screen_changed = 1;
             }
+        }
 
-            if (rtc_edit_active)
+        if (!rs485_info_active && billing_edit_active)
+        {
+            if (switch_events & BOARD_SWITCH_1_LONG)
             {
-                if (switch_events == 0 &&
-                    rtc_edit_idle_timer < RTC_EDIT_TIMEOUT_TICKS)
+                if (Billing_ApplyPendingRecharge())
                 {
-                    rtc_edit_idle_timer++;
-                }
-                if (rtc_edit_idle_timer >= RTC_EDIT_TIMEOUT_TICKS)
-                {
-                    rtc_edit_active = 0;
-                    screen_changed = 1;
-                }
-                if (rtc_edit_active)
-                {
-                    lcd_page = LCD_PAGE_RTC;
+                    billing_edit_active = 0;
+                    lcd_page = LCD_PAGE_BILLING;
                     screen_switch_timer = 0;
+                }
+                screen_changed = 1;
+            }
+            else if (switch_press_events & BOARD_SWITCH_1)
+            {
+                billing_parameter_index++;
+                if (billing_parameter_index >= BILLING_PARAMETER_COUNT)
+                {
+                    billing_parameter_index = 0;
+                }
+                screen_changed = 1;
+            }
+            else if (switch_press_events & BOARD_SWITCH_2)
+            {
+                Billing_AdjustSelectedParameter(0);
+                screen_changed = 1;
+            }
+            else if (switch_press_events & BOARD_SWITCH_3)
+            {
+                Billing_AdjustSelectedParameter(1);
+                screen_changed = 1;
+            }
+        }
+        else if (!rs485_info_active)
+        {
+            if (switch_press_events & BOARD_SWITCH_1)
+            {
+                if (lcd_page == LCD_PAGE_BILLING)
+                {
+                    billing_edit_active = 1;
+                    billing_parameter_index = 0;
+                    lcd_page = LCD_PAGE_BILLING;
+                    screen_switch_timer = 0;
+                    screen_changed = 1;
                 }
             }
         }
@@ -902,16 +1000,6 @@ void main(void)
                         lcd_values_initialized = 0;
                     }
                 }
-            }
-        }
-
-        if (rtc_save_message_ticks != 0)
-        {
-            rtc_save_message_ticks--;
-            if (rtc_save_message_ticks == 0)
-            {
-                rtc_save_message = 0;
-                screen_changed = 1;
             }
         }
 
@@ -951,7 +1039,7 @@ void main(void)
             backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
         }
 
-        if (!rs485_info_active && !rtc_edit_active &&
+        if (!rs485_info_active && !billing_edit_active && !rtc_view_locked &&
             screen_switch_timer >= 2999)
         {
             screen_switch_timer = 0;
@@ -962,7 +1050,8 @@ void main(void)
             }
             screen_changed = 1;
         }
-        else if (!rs485_info_active && !rtc_edit_active)
+        else if (!rs485_info_active && !billing_edit_active &&
+            !rtc_view_locked)
         {
             screen_switch_timer++;
         }
@@ -975,7 +1064,7 @@ void main(void)
             }
         }
         else if (screen_changed ||
-            (lcd_page == LCD_PAGE_RTC && (rtc_refresh_due || switch_events)))
+            (lcd_page == LCD_PAGE_RTC && rtc_refresh_due))
         {
             LCD_ShowPage(lcd_page);
         }
@@ -983,6 +1072,7 @@ void main(void)
         {
             LCD_ShowSlaveRegisters();
         }
+        UpdateLowBalanceBuzzer();
         Board_DelayMs(1);
     }
 }

@@ -9,41 +9,74 @@
 #define SLAVE_RESERVED_REGISTER_COUNT 0
 
 /* Zero-based offsets in the controller's 40001..40050 register table. */
-#define SLAVE_PORT1_BAUD_HIGH_OFFSET 3
-#define SLAVE_PORT1_BAUD_LOW_OFFSET  4
-#define SLAVE_PORT1_PARITY_OFFSET    5
-#define SLAVE_PORT1_ID_OFFSET        6
-#define SLAVE_PORT2_BAUD_HIGH_OFFSET 7
-#define SLAVE_PORT2_BAUD_LOW_OFFSET  8
-#define SLAVE_PORT2_PARITY_OFFSET    9
-#define SLAVE_PORT2_ID_OFFSET       10
+#define SLAVE_PORT1_BAUD_OFFSET      3
+#define SLAVE_PORT1_PARITY_OFFSET    4
+#define SLAVE_PORT1_ID_OFFSET        5
+#define SLAVE_PORT2_BAUD_OFFSET      6
+#define SLAVE_PORT2_PARITY_OFFSET    7
+#define SLAVE_PORT2_ID_OFFSET        8
 
-/* Relays now begin at 40001; meter data is served separately at 40201..40250. */
+/* Relay outputs occupy 40001..40003; meter data is served at 40201..40250. */
 #define SLAVE_RELAY_START           SLAVE_RESERVED_REGISTER_COUNT
 
-/* Application registers follow the relays and RS-485 map. */
-#define COMPANY_NAME_FIRST_OFFSET   11
+/* Register.docx application map: company 40010..40014, balance 40015. */
+#define COMPANY_NAME_FIRST_OFFSET    9
 #define COMPANY_NAME_REGISTER_COUNT 5
-/* 40017 accepts recharge writes and returns the signed calculated balance. */
-#define BALANCE_OFFSET              16
-#define MAIN_RATE_OFFSET            17
-#define DG_RATE_OFFSET              18
-#define SOLAR_RATE_OFFSET           19
-#define LOW_BALANCE_THRESHOLD_OFFSET 20
-#define LOW_BALANCE_ALERT_OFFSET    21
-#define BACKLIGHT_TIMEOUT_OFFSET    22
-#define MAIN_CONSUMPTION_OFFSET     23
-#define DG_CONSUMPTION_OFFSET       24
-#define SOLAR_CONSUMPTION_OFFSET    25
-/* Modbus labels 40027 and 40028; remaining registers are reserved. */
-#define BMS_RELAY_OVERRIDE_OFFSET  26
-#define TAMPER_STATUS_OFFSET       27
+/* 40015 accepts recharge writes and returns the signed calculated balance. */
+#define BALANCE_OFFSET              14
+#define MAIN_KWH_RATE_OFFSET        15
+#define MAIN_KVAH_RATE_OFFSET       16
+#define DG_KWH_RATE_OFFSET          17
+#define DG_KVAH_RATE_OFFSET         18
+#define SOLAR_KWH_RATE_OFFSET       19
+#define SOLAR_KVAH_RATE_OFFSET      20
+#define LOW_BALANCE_THRESHOLD_OFFSET 21
+#define LOW_BALANCE_ALERT_OFFSET    22
+#define BACKLIGHT_TIMEOUT_OFFSET    23
+#define MAIN_CONSUMPTION_OFFSET     24
+#define DG_CONSUMPTION_OFFSET       25
+#define SOLAR_CONSUMPTION_OFFSET    26
+#define TAMPER_EVENT_OFFSET         27
+#define BILLING_PARAMETER_OFFSET    28
+#define RELAY_DISCONNECT_STATUS_OFFSET 29
+#define LOAD_LIMIT_OFFSET           30
+#define TIME_LIMIT_OFFSET           31
+#define DISCONNECT_MODE_OFFSET      32
+#define BMS_RELAY_OVERRIDE_OFFSET   33
+#define CONSUMPTION_AFTER_DISCONNECT_OFFSET 34
+#define RTC_SYNC_YEAR_OFFSET        35
+#define RTC_SYNC_MONTH_OFFSET       36
+#define RTC_SYNC_DAY_OFFSET         37
+#define RTC_SYNC_HOUR_OFFSET        38
+#define RTC_SYNC_MINUTE_OFFSET      39
+#define RTC_SYNC_SECOND_OFFSET      40
+#define RTC_SYNC_COMMAND_OFFSET     41
+#define RTC_SYNC_STATUS_OFFSET      42
+#define RTC_LIVE_YEAR_OFFSET        43
+#define RTC_LIVE_MONTH_OFFSET       44
+#define RTC_LIVE_DAY_OFFSET         45
+#define RTC_LIVE_HOUR_OFFSET        46
+#define RTC_LIVE_MINUTE_OFFSET      47
+#define RTC_LIVE_SECOND_OFFSET      48
+#define RTC_LIVE_VALID_OFFSET       49
+
+#define RTC_SYNC_STATUS_IDLE        0
+#define RTC_SYNC_STATUS_SUCCESS     1
+#define RTC_SYNC_STATUS_FAILED      2
+
+#define BILLING_MODE_KWH            0
+#define BILLING_MODE_KVAH           1
+#define BILLING_MODE_PF             2
+#define BILLING_MODE_KW             3
+#define BILLING_MODE_KVA            4
+#define BILLING_MODE_KVARH          5
 
 #define PREPAID_UI_EVENT_COMPANY    0x01
 #define PREPAID_UI_EVENT_BALANCE    0x02
 #define PREPAID_UI_EVENT_LOADS      0x04
 #define PREPAID_UI_EVENT_RATES      0x08
 #define PREPAID_UI_EVENT_ACTIVITY   0x10
+#define PREPAID_UI_EVENT_TAMPER     0x20
 
 /* Add these globals to Keil Watch 1 while the target is running. */
 extern volatile uint8_t energy_meter_connected;
@@ -85,6 +118,9 @@ extern volatile uint8_t prepaid_ui_events;
 
 void RS485_TestInit(void);
 void RS485_Poll(void);
+void RS485_UpdateLiveRtcRegisters(void);
+uint16_t RS485_GetBillingParameterValue(uint16_t offset);
+uint8_t RS485_SetBillingParameter(uint16_t offset, uint16_t value);
 void RS485_GetCommunicationSettings(uint8_t port, uint32_t *baud_rate,
                                     uint8_t *parity, uint8_t *slave_id);
 

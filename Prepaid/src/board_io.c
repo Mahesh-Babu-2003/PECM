@@ -288,10 +288,15 @@ uint8_t Board_GetTamperStatus(void)
     return tamper_status;
 }
 
-void Board_Beep(uint16_t milliseconds)
+void Board_SetBuzzer(uint8_t on)
 {
     SFRS = 0;
-    BOARD_BUZZER_PIN = 1;
+    BOARD_BUZZER_PIN = on ? 1 : 0;
+}
+
+void Board_Beep(uint16_t milliseconds)
+{
+    Board_SetBuzzer(1);
     Board_DelayMs(milliseconds);
-    BOARD_BUZZER_PIN = 0;
+    Board_SetBuzzer(0);
 }

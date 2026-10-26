@@ -17,6 +17,7 @@ void Board_Shift595(uint8_t value);
 uint8_t Board_ReadSwitchPresses(void);
 uint8_t Board_GetStableSwitches(void);
 uint8_t Board_GetTamperStatus(void);
+void Board_SetBuzzer(uint8_t on);
 void Board_Beep(uint16_t milliseconds);
 
 #endif
