@@ -28,6 +28,8 @@
 #define COMM_CONFIG_EEPROM_OFFSET 0x0060
 #define COMM_CONFIG_RECORD_SIZE 17
 #define COMM_CONFIG_LEGACY_RECORD_SIZE 21
+#define COMM_CONFIG_RECORD_VERSION 3
+#define BAUD_REGISTER_115200 0xFFFF
 #define PREPAID_EEPROM_OFFSET 0x0080
 #define PREPAID_RECORD_SIZE 60
 #define PREPAID_SAVE_DELAY_MS 500UL
@@ -151,7 +153,39 @@ static uint8_t RS485_ParityBit(uint8_t value, uint8_t parity_mode)
     return parity_bit;
 }
 
-static uint32_t RS485_BaudCodeToRate(uint16_t baud_code)
+static uint32_t RS485_BaudRegisterToRate(uint16_t baud_register)
+{
+    switch (baud_register)
+    {
+        case 4800: return 4800UL;
+        case 9600: return 9600UL;
+        case 14400: return 14400UL;
+        case 19200: return 19200UL;
+        case 38400: return 38400UL;
+        case 56000: return 56000UL;
+        case 57600: return 57600UL;
+        case BAUD_REGISTER_115200: return 115200UL;
+        default: return 0;
+    }
+}
+
+static uint16_t RS485_BaudRateToRegister(uint32_t baud_rate)
+{
+    switch (baud_rate)
+    {
+        case 4800UL: return 4800;
+        case 9600UL: return 9600;
+        case 14400UL: return 14400;
+        case 19200UL: return 19200;
+        case 38400UL: return 38400;
+        case 56000UL: return 56000;
+        case 57600UL: return 57600;
+        case 115200UL: return BAUD_REGISTER_115200;
+        default: return 0;
+    }
+}
+
+static uint32_t RS485_LegacyBaudCodeToRate(uint16_t baud_code)
 {
     switch (baud_code)
     {
@@ -167,22 +201,6 @@ static uint32_t RS485_BaudCodeToRate(uint16_t baud_code)
     }
 }
 
-static uint16_t RS485_BaudRateToCode(uint32_t baud_rate)
-{
-    switch (baud_rate)
-    {
-        case 4800UL: return 0;
-        case 9600UL: return 1;
-        case 14400UL: return 2;
-        case 19200UL: return 3;
-        case 38400UL: return 4;
-        case 56000UL: return 5;
-        case 57600UL: return 6;
-        case 115200UL: return 7;
-        default: return 0xFFFF;
-    }
-}
-
 static uint8_t RS485_ConfigRegistersAreValid(void)
 {
     uint32_t baud1;
@@ -190,9 +208,9 @@ static uint8_t RS485_ConfigRegistersAreValid(void)
     uint16_t slave_id1;
     uint16_t slave_id2;
 
-    baud1 = RS485_BaudCodeToRate(
+    baud1 = RS485_BaudRegisterToRate(
         slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET]);
-    baud2 = RS485_BaudCodeToRate(
+    baud2 = RS485_BaudRegisterToRate(
         slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET]);
     slave_id1 = slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
     slave_id2 = slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
@@ -214,22 +232,20 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
                                                    uint16_t value,
                                                    uint16_t bms_override)
 {
-    if (offset < SLAVE_RELAY_START ||
-        offset >= SLAVE_REGISTER_COUNT)
+    if (offset >= SLAVE_REGISTER_COUNT)
     {
         return 0;
     }
-    if (offset >= SLAVE_RELAY_START &&
-        offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+    if (offset == SLAVE_RELAY_COMMAND_OFFSET)
     {
         if (value > 1) return 0;
-        return (uint8_t)(value == 0 || bms_override != 0 ||
+        return (uint8_t)(value == 1 || bms_override != 0 ||
             (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0);
     }
     if (offset == SLAVE_PORT1_BAUD_OFFSET ||
         offset == SLAVE_PORT2_BAUD_OFFSET)
     {
-        return (uint8_t)(value <= 7);
+        return (uint8_t)(RS485_BaudRegisterToRate(value) != 0);
     }
     if (offset == SLAVE_PORT1_PARITY_OFFSET ||
         offset == SLAVE_PORT2_PARITY_OFFSET)
@@ -269,37 +285,7 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     {
         return (uint8_t)(value == 0);
     }
-    if (offset == RTC_SYNC_YEAR_OFFSET)
-    {
-        return (uint8_t)(value >= 2000 && value <= 2199);
-    }
-    if (offset == RTC_SYNC_MONTH_OFFSET)
-    {
-        return (uint8_t)(value >= 1 && value <= 12);
-    }
-    if (offset == RTC_SYNC_DAY_OFFSET)
-    {
-        return (uint8_t)(value >= 1 && value <= 31);
-    }
-    if (offset == RTC_SYNC_HOUR_OFFSET)
-    {
-        return (uint8_t)(value <= 23);
-    }
-    if (offset == RTC_SYNC_MINUTE_OFFSET ||
-        offset == RTC_SYNC_SECOND_OFFSET)
-    {
-        return (uint8_t)(value <= 59);
-    }
-    if (offset == RTC_SYNC_COMMAND_OFFSET)
-    {
-        return (uint8_t)(value <= 1);
-    }
-    if (offset == RTC_SYNC_STATUS_OFFSET)
-    {
-        return 0;
-    }
-    if (offset >= RTC_LIVE_YEAR_OFFSET &&
-        offset <= RTC_LIVE_VALID_OFFSET)
+    if (offset >= RTC_LIVE_YEAR_OFFSET && offset < SLAVE_HOLDING_REGISTER_COUNT)
     {
         return 0;
     }
@@ -344,8 +330,7 @@ static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
     {
         return PREPAID_CHANGE_CREDIT;
     }
-    if (offset >= SLAVE_RELAY_START &&
-        offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+    if (offset == SLAVE_RELAY_COMMAND_OFFSET)
     {
         return PREPAID_CHANGE_LOADS;
     }
@@ -376,27 +361,6 @@ static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
     return 0;
 }
 
-static uint8_t Prepaid_EnforceLimitMode(void)
-{
-    uint8_t changed;
-
-    changed = 0;
-    if (slave_holding_registers[DISCONNECT_MODE_OFFSET] == 0)
-    {
-        if (slave_holding_registers[TIME_LIMIT_OFFSET] != 0)
-        {
-            slave_holding_registers[TIME_LIMIT_OFFSET] = 0;
-            changed = 1;
-        }
-    }
-    else if (slave_holding_registers[LOAD_LIMIT_OFFSET] != 0)
-    {
-        slave_holding_registers[LOAD_LIMIT_OFFSET] = 0;
-        changed = 1;
-    }
-    return changed;
-}
-
 static void Prepaid_UpdateRelayDisconnectStatus(void)
 {
     uint8_t relay_index;
@@ -412,6 +376,34 @@ static void Prepaid_UpdateRelayDisconnectStatus(void)
     }
     slave_holding_registers[RELAY_DISCONNECT_STATUS_OFFSET] =
         all_relays_disconnected;
+    slave_holding_registers[SLAVE_RELAY_COMMAND_OFFSET] = all_relays_disconnected;
+}
+
+static uint8_t Prepaid_SetAllRelays(uint8_t turn_on)
+{
+    uint8_t relay_index;
+    uint8_t changed;
+
+    changed = 0;
+    for (relay_index = 0; relay_index < SLAVE_RELAY_COUNT; relay_index++)
+    {
+        if (!relay_state_known[relay_index] ||
+            slave_relay_states[relay_index] != turn_on)
+        {
+            changed = 1;
+        }
+    }
+    if (changed)
+    {
+        Board_PulseAllRelays(turn_on, 120);
+    }
+    for (relay_index = 0; relay_index < SLAVE_RELAY_COUNT; relay_index++)
+    {
+        slave_relay_states[relay_index] = turn_on;
+        relay_state_known[relay_index] = 1;
+    }
+    Prepaid_UpdateRelayDisconnectStatus();
+    return changed;
 }
 
 static void Prepaid_ObserveConsumptionAfterDisconnect(
@@ -430,24 +422,6 @@ static void Prepaid_ObserveConsumptionAfterDisconnect(
     }
 }
 
-static uint8_t RS485_RtcWeekday(uint16_t year, uint8_t month, uint8_t day)
-{
-    uint16_t century_year;
-    uint16_t century;
-    uint16_t weekday;
-
-    if (month < 3)
-    {
-        month += 12;
-        year--;
-    }
-    century_year = (uint16_t)(year % 100);
-    century = (uint16_t)(year / 100);
-    weekday = (uint16_t)((day + (13 * (month + 1)) / 5 + century_year +
-        (century_year / 4) + (century / 4) + (5 * century)) % 7);
-    return (uint8_t)((weekday + 6) % 7);
-}
-
 void RS485_UpdateLiveRtcRegisters(void)
 {
     if (!rtc_datetime_valid)
@@ -458,7 +432,6 @@ void RS485_UpdateLiveRtcRegisters(void)
         slave_holding_registers[RTC_LIVE_HOUR_OFFSET] = 0;
         slave_holding_registers[RTC_LIVE_MINUTE_OFFSET] = 0;
         slave_holding_registers[RTC_LIVE_SECOND_OFFSET] = 0;
-        slave_holding_registers[RTC_LIVE_VALID_OFFSET] = 0;
         return;
     }
 
@@ -468,44 +441,6 @@ void RS485_UpdateLiveRtcRegisters(void)
     slave_holding_registers[RTC_LIVE_HOUR_OFFSET] = rtc_datetime.hours;
     slave_holding_registers[RTC_LIVE_MINUTE_OFFSET] = rtc_datetime.minutes;
     slave_holding_registers[RTC_LIVE_SECOND_OFFSET] = rtc_datetime.seconds;
-    slave_holding_registers[RTC_LIVE_VALID_OFFSET] = 1;
-}
-
-static uint8_t RS485_ApplyRtcSync(void)
-{
-    RTC_DateTime candidate;
-
-    candidate.year = slave_holding_registers[RTC_SYNC_YEAR_OFFSET];
-    candidate.month = (uint8_t)slave_holding_registers[RTC_SYNC_MONTH_OFFSET];
-    candidate.day = (uint8_t)slave_holding_registers[RTC_SYNC_DAY_OFFSET];
-    candidate.weekday = RS485_RtcWeekday(candidate.year,
-        candidate.month, candidate.day);
-    candidate.hours = (uint8_t)slave_holding_registers[RTC_SYNC_HOUR_OFFSET];
-    candidate.minutes = (uint8_t)slave_holding_registers[RTC_SYNC_MINUTE_OFFSET];
-    candidate.seconds = (uint8_t)slave_holding_registers[RTC_SYNC_SECOND_OFFSET];
-    slave_holding_registers[RTC_SYNC_COMMAND_OFFSET] = 0;
-    slave_holding_registers[RTC_SYNC_STATUS_OFFSET] = RTC_SYNC_STATUS_IDLE;
-
-    if (!RTC_WriteDateTime(&candidate))
-    {
-        slave_holding_registers[RTC_SYNC_STATUS_OFFSET] =
-            RTC_SYNC_STATUS_FAILED;
-        return 0;
-    }
-
-    rtc_datetime.year = candidate.year;
-    rtc_datetime.month = candidate.month;
-    rtc_datetime.day = candidate.day;
-    rtc_datetime.weekday = candidate.weekday;
-    rtc_datetime.hours = candidate.hours;
-    rtc_datetime.minutes = candidate.minutes;
-    rtc_datetime.seconds = candidate.seconds;
-    rtc_datetime_valid = 1;
-    RS485_UpdateLiveRtcRegisters();
-    RTC_SaveDateTimeToEEPROM(&candidate);
-    slave_holding_registers[RTC_SYNC_STATUS_OFFSET] =
-        RTC_SYNC_STATUS_SUCCESS;
-    return 1;
 }
 
 static void RS485_SendByte(uint8_t port, uint8_t value)
@@ -749,11 +684,11 @@ static void MeterEeprom_Load(void)
 static void RS485_SetDefaultCommunicationRegisters(void)
 {
     slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET] =
-        RS485_BaudRateToCode(DEFAULT_RS485_BAUD);
+        RS485_BaudRateToRegister(DEFAULT_RS485_BAUD);
     slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET] = DEFAULT_RS485_PARITY;
     slave_holding_registers[SLAVE_PORT1_ID_OFFSET] = DEFAULT_CONTROLLER_ID;
     slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET] =
-        RS485_BaudRateToCode(DEFAULT_RS485_BAUD);
+        RS485_BaudRateToRegister(DEFAULT_RS485_BAUD);
     slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET] = DEFAULT_RS485_PARITY;
     slave_holding_registers[SLAVE_PORT2_ID_OFFSET] = DEFAULT_METER_SLAVE_ID;
 }
@@ -786,8 +721,8 @@ static void CommConfig_LoadLegacy(void)
 {
     uint32_t port1_baud;
     uint32_t port2_baud;
-    uint16_t baud_code1;
-    uint16_t baud_code2;
+    uint16_t baud_register1;
+    uint16_t baud_register2;
     uint16_t crc;
 
     if (!CommConfig_ReadLegacyRecord()) return;
@@ -812,21 +747,22 @@ static void CommConfig_LoadLegacy(void)
         ((uint32_t)comm_config_legacy_record[12] << 16) |
         ((uint32_t)comm_config_legacy_record[13] << 8) |
         comm_config_legacy_record[14];
-    baud_code1 = RS485_BaudRateToCode(port1_baud);
-    baud_code2 = RS485_BaudRateToCode(port2_baud);
-    if (baud_code1 == 0xFFFF || baud_code2 == 0xFFFF)
+    baud_register1 = RS485_BaudRateToRegister(port1_baud);
+    baud_register2 = RS485_BaudRateToRegister(port2_baud);
+    if (RS485_BaudRegisterToRate(baud_register1) == 0 ||
+        RS485_BaudRegisterToRate(baud_register2) == 0)
     {
         return;
     }
 
-    slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET] = baud_code1;
+    slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET] = baud_register1;
     slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET] =
         ((uint16_t)comm_config_legacy_record[7] << 8) |
         comm_config_legacy_record[8];
     slave_holding_registers[SLAVE_PORT1_ID_OFFSET] =
         ((uint16_t)comm_config_legacy_record[9] << 8) |
         comm_config_legacy_record[10];
-    slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET] = baud_code2;
+    slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET] = baud_register2;
     slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET] =
         ((uint16_t)comm_config_legacy_record[15] << 8) |
         comm_config_legacy_record[16];
@@ -893,7 +829,7 @@ static void CommConfig_BuildRecord(void)
 
     comm_config_record[0] = 0x43;
     comm_config_record[1] = 0x46;
-    comm_config_record[2] = 2;
+    comm_config_record[2] = COMM_CONFIG_RECORD_VERSION;
     for (index = 0; index < COMM_CONFIG_WORD_COUNT; index++)
     {
         value = slave_holding_registers[COMM_CONFIG_FIRST_INDEX + index];
@@ -908,18 +844,21 @@ static void CommConfig_BuildRecord(void)
 static void CommConfig_Load(void)
 {
     uint8_t index;
+    uint8_t version;
+    uint32_t legacy_baud_rate;
     uint16_t crc;
 
     if (!meter_eeprom_present || !CommConfig_ReadRecord()) return;
+    version = comm_config_record[2];
     if (comm_config_record[0] == 0x43 && comm_config_record[1] == 0x46 &&
-        comm_config_record[2] == 1)
+        version == 1)
     {
         CommConfig_LoadLegacy();
         return;
     }
     crc = Modbus_Crc16(comm_config_record, COMM_CONFIG_RECORD_SIZE - 2);
     if (comm_config_record[0] != 0x43 || comm_config_record[1] != 0x46 ||
-        comm_config_record[2] != 2 ||
+        (version != 2 && version != COMM_CONFIG_RECORD_VERSION) ||
         comm_config_record[COMM_CONFIG_RECORD_SIZE - 2] != (uint8_t)crc ||
         comm_config_record[COMM_CONFIG_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
     {
@@ -931,10 +870,33 @@ static void CommConfig_Load(void)
             ((uint16_t)comm_config_record[3 + index * 2] << 8) |
             comm_config_record[4 + index * 2];
     }
+    if (version == 2)
+    {
+        legacy_baud_rate = RS485_LegacyBaudCodeToRate(
+            slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET]);
+        if (legacy_baud_rate == 0)
+        {
+            RS485_SetDefaultCommunicationRegisters();
+            return;
+        }
+        slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET] =
+            RS485_BaudRateToRegister(legacy_baud_rate);
+        legacy_baud_rate = RS485_LegacyBaudCodeToRate(
+            slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET]);
+        if (legacy_baud_rate == 0)
+        {
+            RS485_SetDefaultCommunicationRegisters();
+            return;
+        }
+        slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET] =
+            RS485_BaudRateToRegister(legacy_baud_rate);
+    }
     if (!RS485_ConfigRegistersAreValid())
     {
         RS485_SetDefaultCommunicationRegisters();
+        return;
     }
+    if (version == 2) CommConfig_Save();
 }
 
 static uint8_t CommConfig_Save(void)
@@ -1155,8 +1117,6 @@ static void Prepaid_ServiceBalanceRelays(void)
         {
             Board_PulseRelay((uint8_t)(relay_index + 1), desired_state, 120);
             slave_relay_states[relay_index] = desired_state;
-            slave_holding_registers[SLAVE_RELAY_START + relay_index] =
-                desired_state;
             relay_state_known[relay_index] = 1;
             relays_changed = 1;
         }
@@ -1194,6 +1154,7 @@ static void Prepaid_SetDefaults(void)
     slave_holding_registers[DG_CONSUMPTION_OFFSET] = 0;
     slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = 0;
     slave_holding_registers[BILLING_PARAMETER_OFFSET] = 0;
+    slave_holding_registers[SLAVE_RELAY_COMMAND_OFFSET] = 1;
     slave_holding_registers[RELAY_DISCONNECT_STATUS_OFFSET] = 1;
     slave_holding_registers[LOAD_LIMIT_OFFSET] = 0;
     slave_holding_registers[TIME_LIMIT_OFFSET] = 0;
@@ -1344,7 +1305,6 @@ static void PrepaidEeprom_Load(void)
             0xFFFFUL : (migrated_recharge + cost);
         prepaid_total_recharge_amount = (uint16_t)migrated_recharge;
     }
-    if (Prepaid_EnforceLimitMode()) PrepaidEeprom_RequestSave();
     if (version != 4) PrepaidEeprom_RequestSave();
     Prepaid_RecomputeBalance();
 }
@@ -1557,10 +1517,6 @@ uint8_t RS485_SetBillingParameter(uint16_t offset, uint16_t value)
         slave_holding_registers[offset] = value;
     }
     change_flags = Prepaid_ChangeFlagForOffset(offset);
-    if (Prepaid_EnforceLimitMode())
-    {
-        change_flags |= PREPAID_CHANGE_SETTINGS;
-    }
     Prepaid_CommitChanges(change_flags);
     return 1;
 }
@@ -1787,11 +1743,11 @@ static void RS485_ApplyCommunicationConfig(void)
     comm_config_pending = 0;
     if (!RS485_ConfigRegistersAreValid()) return;
 
-    new_port1_baud = RS485_BaudCodeToRate(
+    new_port1_baud = RS485_BaudRegisterToRate(
         slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET]);
     new_port1_parity = (uint8_t)slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET];
     new_port1_id = (uint8_t)slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
-    new_port2_baud = RS485_BaudCodeToRate(
+    new_port2_baud = RS485_BaudRegisterToRate(
         slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET]);
     new_port2_parity = (uint8_t)slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET];
     new_meter_id = (uint8_t)slave_holding_registers[SLAVE_PORT2_ID_OFFSET];
@@ -1845,13 +1801,13 @@ static uint16_t RS485_ReadActiveCommunicationRegister(uint16_t offset)
     switch (offset)
     {
         case SLAVE_PORT1_BAUD_OFFSET:
-            return RS485_BaudRateToCode(port1_baud_rate);
+            return RS485_BaudRateToRegister(port1_baud_rate);
         case SLAVE_PORT1_PARITY_OFFSET:
             return port1_parity;
         case SLAVE_PORT1_ID_OFFSET:
             return port1_slave_id;
         case SLAVE_PORT2_BAUD_OFFSET:
-            return RS485_BaudRateToCode(port2_baud_rate);
+            return RS485_BaudRateToRegister(port2_baud_rate);
         case SLAVE_PORT2_PARITY_OFFSET:
             return port2_parity;
         case SLAVE_PORT2_ID_OFFSET:
@@ -1866,11 +1822,9 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
     uint8_t function;
     uint8_t quantity;
     uint8_t index;
-    uint8_t relay_index;
     uint8_t byte_count;
     uint8_t config_touched;
     uint8_t change_flags;
-    uint8_t rtc_sync_requested;
     uint16_t start_address;
     uint16_t value;
     uint16_t register_offset;
@@ -1933,14 +1887,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             for (index = 0; index < quantity; index++)
             {
                 register_offset = (uint16_t)(start_address + index);
-                if (register_offset >= SLAVE_RELAY_START &&
-                    register_offset <
-                        (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
-                {
-                    value = slave_relay_states[
-                        register_offset - SLAVE_RELAY_START];
-                }
-                else if (RS485_IsCommunicationConfigOffset(register_offset))
+                if (RS485_IsCommunicationConfigOffset(register_offset))
                 {
                     /* Report the live settings, not an incomplete baud write. */
                     value = RS485_ReadActiveCommunicationRegister(
@@ -1999,8 +1946,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
         if (!RS485_IsWritableRegisterValueValid(start_address, value,
                 slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET]))
         {
-            Modbus_SendException(function,
-                (start_address < SLAVE_RELAY_START) ? 0x02 : 0x03);
+            Modbus_SendException(function, 0x03);
             return;
         }
         change_flags = 0;
@@ -2008,21 +1954,12 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             (int16_t)slave_holding_registers[BALANCE_OFFSET];
         disconnected_before_write =
             (uint8_t)slave_holding_registers[RELAY_DISCONNECT_STATUS_OFFSET];
-        if (start_address >= SLAVE_RELAY_START &&
-            start_address < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+        if (start_address == SLAVE_RELAY_COMMAND_OFFSET)
         {
-            relay_index = (uint8_t)(start_address - SLAVE_RELAY_START);
-            if (!relay_state_known[relay_index] ||
-                slave_relay_states[relay_index] != (uint8_t)value)
+            if (Prepaid_SetAllRelays((uint8_t)(value == 0)))
             {
-                Board_PulseRelay((uint8_t)(relay_index + 1),
-                                 (uint8_t)value, 120);
                 change_flags |= PREPAID_CHANGE_LOADS;
             }
-            slave_relay_states[relay_index] = (uint8_t)value;
-            slave_holding_registers[start_address] = value;
-            relay_state_known[relay_index] = 1;
-            Prepaid_UpdateRelayDisconnectStatus();
         }
         else
         {
@@ -2035,10 +1972,6 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                 change_flags |= Prepaid_ChangeFlagForOffset(start_address);
             }
             slave_holding_registers[start_address] = value;
-            if (Prepaid_EnforceLimitMode())
-            {
-                change_flags |= PREPAID_CHANGE_SETTINGS;
-            }
             if (start_address == TAMPER_EVENT_OFFSET)
             {
                 tamper_event_count = 0;
@@ -2047,10 +1980,6 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             {
                 comm_config_pending = 1;
             }
-        }
-        if (start_address == RTC_SYNC_COMMAND_OFFSET && value == 1)
-        {
-            RS485_ApplyRtcSync();
         }
         Prepaid_CommitChanges(change_flags);
 
@@ -2088,8 +2017,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             Modbus_SendException(function, 0x03);
             return;
         }
-        if (start_address < SLAVE_RELAY_START ||
-            (uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
+        if ((uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
         {
             Modbus_SendException(function, 0x02);
             return;
@@ -2097,7 +2025,6 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
 
         config_touched = 0;
         change_flags = 0;
-        rtc_sync_requested = 0;
         bms_override_for_validation =
             slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET];
         for (index = 0; index < quantity; index++)
@@ -2124,10 +2051,6 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             if (RS485_IsCommunicationConfigOffset(register_offset))
             {
                 config_touched = 1;
-            }
-            if (register_offset == RTC_SYNC_COMMAND_OFFSET && value == 1)
-            {
-                rtc_sync_requested = 1;
             }
             if (register_offset == BALANCE_OFFSET ||
                 slave_holding_registers[register_offset] != value)
@@ -2177,36 +2100,24 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             }
             value = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
                     port1_rx_buffer[8 + (index * 2)];
-            if (register_offset >= SLAVE_RELAY_START &&
-                register_offset < (SLAVE_RELAY_START + SLAVE_RELAY_COUNT))
+            if (register_offset == SLAVE_RELAY_COMMAND_OFFSET)
             {
-                relay_index = (uint8_t)(register_offset - SLAVE_RELAY_START);
-                if (!relay_state_known[relay_index] ||
-                    slave_relay_states[relay_index] != (uint8_t)value)
+                if (Prepaid_SetAllRelays((uint8_t)(value == 0)))
                 {
-                    Board_PulseRelay((uint8_t)(relay_index + 1),
-                                     (uint8_t)value, 120);
                     change_flags |= PREPAID_CHANGE_LOADS;
                 }
-                slave_relay_states[relay_index] = (uint8_t)value;
-                relay_state_known[relay_index] = 1;
             }
-            Prepaid_ObserveConsumptionAfterDisconnect(register_offset,
-                slave_holding_registers[register_offset], value,
-                balance_before_write, disconnected_before_write);
-            slave_holding_registers[register_offset] = value;
+            else
+            {
+                Prepaid_ObserveConsumptionAfterDisconnect(register_offset,
+                    slave_holding_registers[register_offset], value,
+                    balance_before_write, disconnected_before_write);
+                slave_holding_registers[register_offset] = value;
+            }
             if (register_offset == TAMPER_EVENT_OFFSET)
             {
                 tamper_event_count = 0;
             }
-        }
-        if (Prepaid_EnforceLimitMode())
-        {
-            change_flags |= PREPAID_CHANGE_SETTINGS;
-        }
-        if (rtc_sync_requested)
-        {
-            RS485_ApplyRtcSync();
         }
         Prepaid_UpdateRelayDisconnectStatus();
         if (config_touched)
@@ -2405,11 +2316,12 @@ void RS485_TestInit(void)
     MeterEeprom_Load();
     CommConfig_Load();
     PrepaidEeprom_Load();
-    port1_baud_rate = RS485_BaudCodeToRate(
+    Prepaid_UpdateRelayDisconnectStatus();
+    port1_baud_rate = RS485_BaudRegisterToRate(
         slave_holding_registers[SLAVE_PORT1_BAUD_OFFSET]);
     port1_parity = (uint8_t)slave_holding_registers[SLAVE_PORT1_PARITY_OFFSET];
     port1_slave_id = (uint8_t)slave_holding_registers[SLAVE_PORT1_ID_OFFSET];
-    port2_baud_rate = RS485_BaudCodeToRate(
+    port2_baud_rate = RS485_BaudRegisterToRate(
         slave_holding_registers[SLAVE_PORT2_BAUD_OFFSET]);
     port2_parity = (uint8_t)slave_holding_registers[SLAVE_PORT2_PARITY_OFFSET];
     meter_slave_id = (uint8_t)slave_holding_registers[SLAVE_PORT2_ID_OFFSET];

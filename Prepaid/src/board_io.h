@@ -13,6 +13,7 @@ void Board_Init(void);
 void Board_DelayMs(uint16_t milliseconds);
 void Board_SetRs485Transmit(uint8_t port, uint8_t enable);
 void Board_PulseRelay(uint8_t channel, uint8_t turn_on, uint16_t milliseconds);
+void Board_PulseAllRelays(uint8_t turn_on, uint16_t milliseconds);
 void Board_Shift595(uint8_t value);
 uint8_t Board_ReadSwitchPresses(void);
 uint8_t Board_GetStableSwitches(void);

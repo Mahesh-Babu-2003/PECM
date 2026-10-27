@@ -153,6 +153,25 @@ void Board_PulseRelay(uint8_t channel, uint8_t turn_on, uint16_t milliseconds)
     Board_RelayCoilsOff();
 }
 
+void Board_PulseAllRelays(uint8_t turn_on, uint16_t milliseconds)
+{
+    SFRS = 0;
+    if (turn_on)
+    {
+        RELAY_SET_1_PIN = 1;
+        RELAY_SET_2_PIN = 1;
+        RELAY_SET_3_PIN = 1;
+    }
+    else
+    {
+        RELAY_RESET_1_PIN = 1;
+        RELAY_RESET_2_PIN = 1;
+        RELAY_RESET_3_PIN = 1;
+    }
+    Board_DelayMs(milliseconds);
+    Board_RelayCoilsOff();
+}
+
 void Board_Shift595(uint8_t value)
 {
     uint8_t bit_index;

@@ -2,6 +2,7 @@
 ".\Output\board_io.obj",
 ".\Output\i2c_probe.obj",
 ".\Output\lcd_595.obj",
+".\Output\lcd_ui.obj",
 ".\Output\rs485_test.obj",
 ".\Output\common.obj",
 ".\Output\sys.obj",
