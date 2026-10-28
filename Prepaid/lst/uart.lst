@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   UART                                                              10/27/2026 18:03:26 PAGE 1   
+C51 COMPILER V9.60.0.0   UART                                                              10/28/2026 12:07:05 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE UART
@@ -62,7 +62,7 @@ line level    source
               void SerialPort1_ISR(void) interrupt 15
               #elif defined __ICC8051__
               #pragma vector=0x7B
-C51 COMPILER V9.60.0.0   UART                                                              10/27/2026 18:03:26 PAGE 2   
+C51 COMPILER V9.60.0.0   UART                                                              10/28/2026 12:07:05 PAGE 2   
 
               __interrupt void SerialPort1_ISR(void)
               #elif defined __SDCC__
@@ -126,7 +126,7 @@ line level    source
  106   2                  break;
  107   2          }
  108   1       }
-C51 COMPILER V9.60.0.0   UART                                                              10/27/2026 18:03:26 PAGE 3   
+C51 COMPILER V9.60.0.0   UART                                                              10/28/2026 12:07:05 PAGE 3   
 
  109          
  110          uint8_t Receive_Data(uint8_t UARTPort)
@@ -190,7 +190,7 @@ MODULE INFORMATION:   STATIC OVERLAYABLE
    XDATA SIZE       =      2       9
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
-C51 COMPILER V9.60.0.0   UART                                                              10/27/2026 18:03:26 PAGE 4   
+C51 COMPILER V9.60.0.0   UART                                                              10/28/2026 12:07:05 PAGE 4   
 
    IDATA SIZE       =   ----    ----
    BIT SIZE         =      3    ----

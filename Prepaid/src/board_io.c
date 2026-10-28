@@ -22,16 +22,13 @@ sbit BOARD_TAMPER_PIN = P2^4;
 sbit BOARD_BUZZER_PIN = P3^4;
 
 #define SWITCH_DEBOUNCE_SAMPLES 20
-#define SWITCH_1_LONG_PRESS_SAMPLES 5000
-#define SWITCH_2_3_LONG_PRESS_SAMPLES 5000
+#define SWITCH_3_LONG_PRESS_SAMPLES 3000
 #define TAMPER_DEBOUNCE_SAMPLES 20
 
 static uint8_t switch_debounce_counter[3];
 static uint8_t switch_stable_pressed;
-static uint16_t switch_1_hold_samples;
-static uint8_t switch_1_long_press_reported;
-static uint16_t switch_2_3_hold_samples;
-static uint8_t switch_2_3_long_press_reported;
+static uint16_t switch_3_hold_samples;
+static uint8_t switch_3_long_press_reported;
 static uint8_t tamper_status;
 static uint8_t tamper_debounce_counter;
 
@@ -226,6 +223,11 @@ uint8_t Board_ReadSwitchPresses(void)
                 else
                 {
                     switch_stable_pressed &= (uint8_t)~button_mask;
+                    if (button_mask == BOARD_SWITCH_3 &&
+                        !switch_3_long_press_reported)
+                    {
+                        events |= BOARD_SWITCH_3_RELEASED;
+                    }
                 }
             }
         }
@@ -236,43 +238,23 @@ uint8_t Board_ReadSwitchPresses(void)
         button_mask <<= 1;
     }
 
-    if (switch_stable_pressed & BOARD_SWITCH_1)
+    if (switch_stable_pressed & BOARD_SWITCH_3)
     {
-        if (switch_1_hold_samples < SWITCH_1_LONG_PRESS_SAMPLES)
+        if (switch_3_hold_samples < SWITCH_3_LONG_PRESS_SAMPLES)
         {
-            switch_1_hold_samples++;
+            switch_3_hold_samples++;
         }
-        if (switch_1_hold_samples >= SWITCH_1_LONG_PRESS_SAMPLES &&
-            !switch_1_long_press_reported)
+        if (switch_3_hold_samples >= SWITCH_3_LONG_PRESS_SAMPLES &&
+            !switch_3_long_press_reported)
         {
-            events |= BOARD_SWITCH_1_LONG;
-            switch_1_long_press_reported = 1;
-        }
-    }
-    else
-    {
-        switch_1_hold_samples = 0;
-        switch_1_long_press_reported = 0;
-    }
-
-    if ((switch_stable_pressed & (BOARD_SWITCH_2 | BOARD_SWITCH_3)) ==
-        (BOARD_SWITCH_2 | BOARD_SWITCH_3))
-    {
-        if (switch_2_3_hold_samples < SWITCH_2_3_LONG_PRESS_SAMPLES)
-        {
-            switch_2_3_hold_samples++;
-        }
-        if (switch_2_3_hold_samples >= SWITCH_2_3_LONG_PRESS_SAMPLES &&
-            !switch_2_3_long_press_reported)
-        {
-            events |= BOARD_SWITCH_2_3_LONG;
-            switch_2_3_long_press_reported = 1;
+            events |= BOARD_SWITCH_3_LONG;
+            switch_3_long_press_reported = 1;
         }
     }
     else
     {
-        switch_2_3_hold_samples = 0;
-        switch_2_3_long_press_reported = 0;
+        switch_3_hold_samples = 0;
+        switch_3_long_press_reported = 0;
     }
     return events;
 }

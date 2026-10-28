@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   SYS                                                               10/27/2026 18:03:26 PAGE 1   
+C51 COMPILER V9.60.0.0   SYS                                                               10/28/2026 12:07:04 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE SYS
@@ -62,7 +62,7 @@ line level    source
   44   1          IAPCN = READ_UID;
   45   1          set_IAPTRG_IAPGO;
   46   1          hircmap0 = IAPFD;
-C51 COMPILER V9.60.0.0   SYS                                                               10/27/2026 18:03:26 PAGE 2   
+C51 COMPILER V9.60.0.0   SYS                                                               10/28/2026 12:07:04 PAGE 2   
 
   47   1          IAPAL++;
   48   1          set_IAPTRG_IAPGO;
@@ -126,7 +126,7 @@ line level    source
  106   2          case FSYS_HXT:
  107   2              ClockEnable(FSYS_HIRC);                      /*step1: switching system clock to HIRC */
  108   2              ClockSwitch(FSYS_HIRC);
-C51 COMPILER V9.60.0.0   SYS                                                               10/27/2026 18:03:26 PAGE 3   
+C51 COMPILER V9.60.0.0   SYS                                                               10/28/2026 12:07:04 PAGE 3   
 
  109   2              ClockEnable(FSYS_HXT);                       /*step2: switching system clock to HXT  */
  110   2              ClockSwitch(FSYS_HXT);
@@ -190,7 +190,7 @@ line level    source
  168   2          break;
  169   2          
  170   2          /***** ECLK P30 enable part ******/
-C51 COMPILER V9.60.0.0   SYS                                                               10/27/2026 18:03:26 PAGE 4   
+C51 COMPILER V9.60.0.0   SYS                                                               10/28/2026 12:07:04 PAGE 4   
 
  171   2          case FSYS_OSCIN_P30:
  172   2              set_CKEN_EXTEN1;                        /*step1: Enable extnal clock source. */
@@ -254,7 +254,7 @@ line level    source
  230   1        {
  231   2          /***** HXT Disable part*****/
  232   2          case FSYS_HXT:
-C51 COMPILER V9.60.0.0   SYS                                                               10/27/2026 18:03:26 PAGE 5   
+C51 COMPILER V9.60.0.0   SYS                                                               10/28/2026 12:07:04 PAGE 5   
 
  233   2              exflag = 1;
  234   2          break;    

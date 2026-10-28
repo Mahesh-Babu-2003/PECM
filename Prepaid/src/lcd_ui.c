@@ -86,30 +86,71 @@ static void LCD_UI_ShowLoadStatus(void)
     else { LCD_WriteText("Connected"); LCD_UI_PadLine(1, 9); }
 }
 
-static void LCD_UI_ShowMainUnits(void)
+static void LCD_UI_ShowRateScreen(uint8_t screen_number)
 {
+    uint16_t rate;
     uint8_t used;
-    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Unit Rate");
-    LCD_UI_PadLine(0, 9); LCD_SetCursor(1, 0); LCD_WriteText("Main units:");
-    used = (uint8_t)(11 + LCD_UI_WriteUnsignedLong(slave_holding_registers[MAIN_CONSUMPTION_OFFSET]));
+    LCD_Command(0x0C);
+    LCD_SetCursor(0, 0);
+    switch (screen_number)
+    {
+        case LCD_UI_SCREEN_4_MAIN_KWH_RATE:
+            LCD_WriteText("Mains kWh Rate");
+            rate = slave_holding_registers[MAIN_KWH_RATE_OFFSET];
+            break;
+        case LCD_UI_SCREEN_5_MAIN_KVAH_RATE:
+            LCD_WriteText("Mains kVAh Rate");
+            rate = slave_holding_registers[MAIN_KVAH_RATE_OFFSET];
+            break;
+        case LCD_UI_SCREEN_6_DG_KWH_RATE:
+            LCD_WriteText("DG kWh Rate");
+            rate = slave_holding_registers[DG_KWH_RATE_OFFSET];
+            break;
+        case LCD_UI_SCREEN_7_DG_KVAH_RATE:
+            LCD_WriteText("DG kVAh Rate");
+            rate = slave_holding_registers[DG_KVAH_RATE_OFFSET];
+            break;
+        case LCD_UI_SCREEN_8_SOLAR_KWH_RATE:
+            LCD_WriteText("Solar kWh Rate");
+            rate = slave_holding_registers[SOLAR_KWH_RATE_OFFSET];
+            break;
+        default:
+            LCD_WriteText("Solar kVAh Rate");
+            rate = slave_holding_registers[SOLAR_KVAH_RATE_OFFSET];
+            break;
+    }
+    LCD_UI_PadLine(0, 16); LCD_SetCursor(1, 0); LCD_WriteText("Rate: ");
+    used = (uint8_t)(6 + LCD_UI_WriteUnsignedLong(rate));
     LCD_UI_PadLine(1, used);
 }
 
-static void LCD_UI_ShowDgSolarUnits(void)
+static void LCD_UI_ShowBillingParameter(void)
 {
-    uint8_t used;
-    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("DG units: ");
-    used = (uint8_t)(10 + LCD_UI_WriteUnsignedLong(slave_holding_registers[DG_CONSUMPTION_OFFSET]));
-    LCD_UI_PadLine(0, used); LCD_SetCursor(1, 0); LCD_WriteText("Sol units:");
-    used = (uint8_t)(10 + LCD_UI_WriteUnsignedLong(slave_holding_registers[SOLAR_CONSUMPTION_OFFSET]));
-    LCD_UI_PadLine(1, used);
+    uint16_t parameter;
+    parameter = slave_holding_registers[BILLING_PARAMETER_OFFSET];
+    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Billing Param");
+    LCD_UI_PadLine(0, 13); LCD_SetCursor(1, 0);
+    switch (parameter)
+    {
+        case BILLING_MODE_KWH:  LCD_WriteText("0: kWh"); break;
+        case BILLING_MODE_KVAH: LCD_WriteText("1: kVAh"); break;
+        case BILLING_MODE_PF:   LCD_WriteText("2: PF"); break;
+        case BILLING_MODE_KW:   LCD_WriteText("3: kW"); break;
+        case BILLING_MODE_KVA:  LCD_WriteText("4: kVA"); break;
+        case BILLING_MODE_KVARH: LCD_WriteText("5: kVArh"); break;
+        default: LCD_WriteText("Invalid value"); break;
+    }
+    LCD_UI_PadLine(1, 13);
 }
 
 static void LCD_UI_ShowLowBalanceAlert(void)
 {
+    uint8_t used;
     LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Low Balance");
-    LCD_UI_PadLine(0, 11); LCD_SetCursor(1, 0); LCD_WriteText("Alert");
-    LCD_UI_PadLine(1, 5);
+    LCD_UI_PadLine(0, 11); LCD_SetCursor(1, 0); LCD_WriteText("Alert: ");
+    used = (uint8_t)(7 + LCD_UI_WriteUnsignedLong(
+        slave_holding_registers[LOW_BALANCE_ALERT_OFFSET]));
+    LCD_UI_PadLine(1, used);
 }
 
 static void LCD_UI_ShowLowBalanceThreshold(void)
@@ -165,6 +206,38 @@ static void LCD_UI_ShowConsumptionFlag(void)
     LCD_UI_PadLine(1, used);
 }
 
+static void LCD_UI_ShowLastRecharge(void)
+{
+    uint8_t used;
+    int16_t amount;
+    amount = (int16_t)slave_holding_registers[LAST_RECHARGE_OFFSET];
+    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Last Recharge");
+    LCD_UI_PadLine(0, 13); LCD_SetCursor(1, 0); LCD_WriteText("Amount: ");
+    used = (uint8_t)(8 + LCD_UI_WriteSignedInteger(amount));
+    LCD_UI_PadLine(1, used);
+}
+
+static void LCD_UI_ShowTotalDeducted(void)
+{
+    uint8_t used;
+    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Total Deducted");
+    LCD_UI_PadLine(0, 14); LCD_SetCursor(1, 0); LCD_WriteText("Amount: ");
+    used = (uint8_t)(8 + LCD_UI_WriteUnsignedLong(
+        slave_holding_registers[TOTAL_DEDUCTED_OFFSET]));
+    LCD_UI_PadLine(1, used);
+}
+
+static void LCD_UI_ShowTotalAmount(void)
+{
+    uint8_t used;
+    int16_t amount;
+    amount = (int16_t)slave_holding_registers[TOTAL_AMOUNT_OFFSET];
+    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Total Amount");
+    LCD_UI_PadLine(0, 12); LCD_SetCursor(1, 0); LCD_WriteText("Amount: ");
+    used = (uint8_t)(8 + LCD_UI_WriteSignedInteger(amount));
+    LCD_UI_PadLine(1, used);
+}
+
 void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
 {
     switch (screen_number)
@@ -172,14 +245,33 @@ void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
         case LCD_UI_SCREEN_1_CUSTOMER_ID: LCD_UI_ShowCompanyName(); break;
         case LCD_UI_SCREEN_2_BALANCE: LCD_UI_ShowBalance(); break;
         case LCD_UI_SCREEN_3_LOAD_STATUS: LCD_UI_ShowLoadStatus(); break;
-        case LCD_UI_SCREEN_4_MAIN_UNITS: LCD_UI_ShowMainUnits(); break;
-        case LCD_UI_SCREEN_5_DG_SOLAR_UNITS: LCD_UI_ShowDgSolarUnits(); break;
-        case LCD_UI_SCREEN_6_LOW_BALANCE_ALERT: LCD_UI_ShowLowBalanceAlert(); break;
-        case LCD_UI_SCREEN_7_LOW_BALANCE_LIMIT: LCD_UI_ShowLowBalanceThreshold(); break;
-        case LCD_UI_SCREEN_8_DISCONNECT_LIMIT: LCD_UI_ShowDisconnectLimit(); break;
-        case LCD_UI_SCREEN_9_TAMPER_EVENT: LCD_UI_ShowTamperEvent(); break;
-        case LCD_UI_SCREEN_10_BMS_OVERRIDE: LCD_UI_ShowBmsOverride(); break;
-        default: LCD_UI_ShowConsumptionFlag(); break;
+        case LCD_UI_SCREEN_4_MAIN_KWH_RATE:
+        case LCD_UI_SCREEN_5_MAIN_KVAH_RATE:
+        case LCD_UI_SCREEN_6_DG_KWH_RATE:
+        case LCD_UI_SCREEN_7_DG_KVAH_RATE:
+        case LCD_UI_SCREEN_8_SOLAR_KWH_RATE:
+        case LCD_UI_SCREEN_9_SOLAR_KVAH_RATE:
+            LCD_UI_ShowRateScreen(screen_number); break;
+        case LCD_UI_SCREEN_10_LOW_BALANCE_ALERT:
+            LCD_UI_ShowLowBalanceAlert(); break;
+        case LCD_UI_SCREEN_11_LOW_BALANCE_LIMIT:
+            LCD_UI_ShowLowBalanceThreshold(); break;
+        case LCD_UI_SCREEN_12_DISCONNECT_LIMIT:
+            LCD_UI_ShowDisconnectLimit(); break;
+        case LCD_UI_SCREEN_13_TAMPER_EVENT:
+            LCD_UI_ShowTamperEvent(); break;
+        case LCD_UI_SCREEN_14_BMS_OVERRIDE:
+            LCD_UI_ShowBmsOverride(); break;
+        case LCD_UI_SCREEN_15_BILLING_PARAMETER:
+            LCD_UI_ShowBillingParameter(); break;
+        case LCD_UI_SCREEN_16_LAST_RECHARGE:
+            LCD_UI_ShowLastRecharge(); break;
+        case LCD_UI_SCREEN_17_TOTAL_AMOUNT:
+            LCD_UI_ShowTotalAmount(); break;
+        case LCD_UI_SCREEN_18_TOTAL_DEDUCTED:
+            LCD_UI_ShowTotalDeducted(); break;
+        default:
+            LCD_UI_ShowConsumptionFlag(); break;
     }
 }
 
@@ -190,7 +282,7 @@ uint8_t LCD_UI_NextCustomerScreen(uint8_t current_screen)
     {
         next++;
         if (next > LCD_UI_SCREEN_COUNT) next = LCD_UI_SCREEN_1_CUSTOMER_ID;
-    } while (next == LCD_UI_SCREEN_6_LOW_BALANCE_ALERT &&
+    } while (next == LCD_UI_SCREEN_10_LOW_BALANCE_ALERT &&
         slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] != 1);
     return next;
 }
@@ -202,8 +294,8 @@ void LCD_UI_ShowRtcEdit(uint8_t digit_index)
     LCD_SetCursor(0, 0);
     if (!rtc_datetime_valid)
     {
-        LCD_WriteText("RTC NOT SET     ");
-        LCD_SetCursor(1, 0); LCD_WriteText("HOLD SW1 5 SEC  ");
+        LCD_WriteText("RTC READ FAILED ");
+        LCD_SetCursor(1, 0); LCD_WriteText("CHECK RTC/I2C   ");
         return;
     }
     LCD_WriteText("DATE: ");

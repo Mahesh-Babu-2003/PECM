@@ -6,6 +6,10 @@
 #include "rs485_test.h"
 
 #define RTC_EDIT_DIGIT_COUNT 14
+#define RTC_EDIT_ENTRY_PRESS_COUNT 3
+#define RTC_EDIT_ENTRY_TIMEOUT_TICKS 2000
+#define RTC_EDIT_SAVE_BEEP_MS 50
+#define RTC_EDIT_SAVE_ERROR_BEEP_MS 150
 #define CUSTOMER_SCREEN_TICKS 3000
 #define CUSTOMER_VALUE_REFRESH_TICKS 1000
 #define LOW_BALANCE_BEEP_REPEAT_HALF_SECOND_UNITS 60
@@ -25,6 +29,8 @@ static uint8_t low_balance_beep_count;
 static uint16_t low_balance_buzzer_timer;
 static uint8_t rtc_edit_active;
 static uint8_t rtc_edit_digit;
+static uint8_t rtc_edit_entry_press_count;
+static uint16_t rtc_edit_entry_timer;
 static uint8_t customer_display_screen;
 static uint16_t customer_display_timer;
 static uint16_t customer_value_refresh_timer;
@@ -195,7 +201,6 @@ static void RTC_AdjustSelectedDigit(uint8_t increase)
     {
         candidate.weekday = RTC_CalculateWeekday(candidate.year,
             candidate.month, candidate.day);
-        if (!RTC_WriteDateTime(&candidate)) return;
         rtc_datetime.year = candidate.year;
         rtc_datetime.month = candidate.month;
         rtc_datetime.day = candidate.day;
@@ -203,8 +208,6 @@ static void RTC_AdjustSelectedDigit(uint8_t increase)
         rtc_datetime.hours = candidate.hours;
         rtc_datetime.minutes = candidate.minutes;
         rtc_datetime.seconds = candidate.seconds;
-        rtc_datetime_valid = 1;
-        RS485_UpdateLiveRtcRegisters();
     }
 }
 
@@ -261,6 +264,14 @@ void main(void)
         backlight_activity = 0;
         switch_events = 0;
         RS485_Poll();
+        if (rtc_edit_entry_timer != 0)
+        {
+            rtc_edit_entry_timer--;
+            if (rtc_edit_entry_timer == 0)
+            {
+                rtc_edit_entry_press_count = 0;
+            }
+        }
         prepaid_events = prepaid_ui_events;
         prepaid_ui_events = 0;
         if (prepaid_events & PREPAID_UI_EVENT_ACTIVITY)
@@ -294,59 +305,79 @@ void main(void)
             Board_Beep(35);
         }
 
-        if (switch_events & BOARD_SWITCH_1_LONG)
+        if (!rtc_edit_active)
         {
-            if (!rtc_edit_active)
+            if (switch_press_events & BOARD_SWITCH_2)
             {
-                if (!rtc_datetime_valid) RTC_RestoreEepromSnapshot();
-                if (!rtc_datetime_valid)
+                if (rtc_edit_entry_press_count == 0)
                 {
-                    rtc_save_datetime.year = 2000;
-                    rtc_save_datetime.month = 1;
-                    rtc_save_datetime.day = 1;
-                    rtc_save_datetime.weekday = 6;
-                    rtc_save_datetime.hours = 0;
-                    rtc_save_datetime.minutes = 0;
-                    rtc_save_datetime.seconds = 0;
-                    if (RTC_WriteDateTime(&rtc_save_datetime))
-                    {
-                        rtc_datetime.year = rtc_save_datetime.year;
-                        rtc_datetime.month = rtc_save_datetime.month;
-                        rtc_datetime.day = rtc_save_datetime.day;
-                        rtc_datetime.weekday = rtc_save_datetime.weekday;
-                        rtc_datetime.hours = rtc_save_datetime.hours;
-                        rtc_datetime.minutes = rtc_save_datetime.minutes;
-                        rtc_datetime.seconds = rtc_save_datetime.seconds;
-                        rtc_datetime_valid = 1;
-                    }
-                }
-                rtc_edit_active = 1;
-                rtc_edit_digit = 0;
-            }
-            else
-            {
-                rtc_save_datetime.year = rtc_datetime.year;
-                rtc_save_datetime.month = rtc_datetime.month;
-                rtc_save_datetime.day = rtc_datetime.day;
-                rtc_save_datetime.weekday = rtc_datetime.weekday;
-                rtc_save_datetime.hours = rtc_datetime.hours;
-                rtc_save_datetime.minutes = rtc_datetime.minutes;
-                rtc_save_datetime.seconds = rtc_datetime.seconds;
-                if (rtc_datetime_valid &&
-                    RTC_SaveDateTimeToEEPROM(&rtc_save_datetime))
-                {
-                    Board_Beep(50);
+                    rtc_edit_entry_press_count = 1;
                 }
                 else
                 {
-                    Board_Beep(150);
+                    rtc_edit_entry_press_count++;
+                }
+                rtc_edit_entry_timer = RTC_EDIT_ENTRY_TIMEOUT_TICKS;
+                if (rtc_edit_entry_press_count >=
+                    RTC_EDIT_ENTRY_PRESS_COUNT)
+                {
+                    rtc_edit_entry_press_count = 0;
+                    rtc_edit_entry_timer = 0;
+                    if (RTC_ReadDateTime(&rtc_datetime))
+                    {
+                        rtc_edit_active = 1;
+                        rtc_edit_digit = 0;
+                        customer_display_timer = 0;
+                        customer_value_refresh_timer = 0;
+                        screen_changed = 1;
+                    }
+                    else
+                    {
+                        RS485_UpdateLiveRtcRegisters();
+                        LCD_UI_ShowRtcEdit(0);
+                    }
+                }
+            }
+            else if (switch_press_events != 0)
+            {
+                rtc_edit_entry_press_count = 0;
+                rtc_edit_entry_timer = 0;
+            }
+        }
+        else if (switch_events & BOARD_SWITCH_3_LONG)
+        {
+            rtc_save_datetime.year = rtc_datetime.year;
+            rtc_save_datetime.month = rtc_datetime.month;
+            rtc_save_datetime.day = rtc_datetime.day;
+            rtc_save_datetime.weekday = rtc_datetime.weekday;
+            rtc_save_datetime.hours = rtc_datetime.hours;
+            rtc_save_datetime.minutes = rtc_datetime.minutes;
+            rtc_save_datetime.seconds = rtc_datetime.seconds;
+            if (rtc_datetime_valid &&
+                RTC_DateTimeIsValid(&rtc_save_datetime) &&
+                RTC_WriteDateTime(&rtc_save_datetime))
+            {
+                RS485_UpdateLiveRtcRegisters();
+                if (RTC_SaveDateTimeToEEPROM(&rtc_save_datetime))
+                {
+                    Board_Beep(RTC_EDIT_SAVE_BEEP_MS);
+                }
+                else
+                {
+                    Board_Beep(RTC_EDIT_SAVE_ERROR_BEEP_MS);
                 }
                 rtc_edit_active = 0;
+                customer_display_timer = 0;
+                customer_value_refresh_timer = 0;
+                LCD_UI_ShowCustomerScreen(customer_display_screen);
+            }
+            else
+            {
+                Board_Beep(RTC_EDIT_SAVE_ERROR_BEEP_MS);
             }
             screen_changed = 1;
         }
-
-        if (rtc_edit_active && !(switch_events & BOARD_SWITCH_1_LONG))
+        else if (rtc_edit_active)
         {
             if (switch_press_events & BOARD_SWITCH_1)
             {
@@ -359,16 +390,14 @@ void main(void)
                 RTC_AdjustSelectedDigit(1);
                 screen_changed = 1;
             }
-            else if (switch_press_events & BOARD_SWITCH_3)
+            else if (switch_events & BOARD_SWITCH_3_RELEASED)
             {
                 RTC_AdjustSelectedDigit(0);
                 screen_changed = 1;
             }
         }
 
-        if (!rtc_edit_active &&
-            (switch_press_events & BOARD_SWITCH_1) &&
-            !(switch_events & BOARD_SWITCH_1_LONG))
+        if (!rtc_edit_active && (switch_press_events & BOARD_SWITCH_1))
         {
             customer_display_screen = LCD_UI_NextCustomerScreen(
                 customer_display_screen);
@@ -419,10 +448,6 @@ void main(void)
         }
         else
         {
-            if (switch_events & BOARD_SWITCH_1_LONG)
-            {
-                LCD_UI_ShowCustomerScreen(customer_display_screen);
-            }
             if ((prepaid_events & PREPAID_UI_EVENT_COMPANY) &&
                 customer_display_screen == LCD_UI_SCREEN_1_CUSTOMER_ID)
             {
@@ -443,7 +468,7 @@ void main(void)
                 (CUSTOMER_VALUE_REFRESH_TICKS - 1))
             {
                 customer_value_refresh_timer = 0;
-                if (customer_display_screen == LCD_UI_SCREEN_6_LOW_BALANCE_ALERT &&
+                if (customer_display_screen == LCD_UI_SCREEN_10_LOW_BALANCE_ALERT &&
                     slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] != 1)
                 {
                     customer_display_screen = LCD_UI_NextCustomerScreen(

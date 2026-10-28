@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 1   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE I2C_PROBE
@@ -62,7 +62,7 @@ line level    source
   50   1          if (acknowledge) I2CON |= 0x04;
   51   1          else I2CON &= (uint8_t)~0x04;
   52   1      
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 2   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 2   
 
   53   1          I2CON &= (uint8_t)~I2C_SI;
   54   1          if (!I2C_WaitComplete()) return 0;
@@ -126,7 +126,7 @@ line level    source
  112          static uint8_t I2C_WriteRegister(uint8_t address, uint8_t register_address,
  113                                           const uint8_t *buffer, uint8_t length)
  114          {
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 3   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 3   
 
  115   1          uint8_t index;
  116   1      
@@ -190,7 +190,7 @@ line level    source
  174                                         uint8_t length)
  175          {
  176   1          uint8_t index;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 4   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 4   
 
  177   1      
  178   1          if (length == 0 || (uint32_t)address + length > 8192UL ||
@@ -254,7 +254,7 @@ line level    source
  236   1          tens = (uint8_t)((value >> 4) & 0x0F);
  237   1          units = (uint8_t)(value & 0x0F);
  238   1          if (tens > 9 || units > 9)
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 5   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 5   
 
  239   1          {
  240   2              return 0;
@@ -318,7 +318,7 @@ line level    source
  298   1          if (!RTC_DateTimeIsValid(datetime)) return 0;
  299   1      
  300   1          record[0] = 0x52;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 6   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 6   
 
  301   1          record[1] = 0x54;
  302   1          record[2] = 0x01;
@@ -382,7 +382,7 @@ line level    source
  360   1          *datetime = candidate;
  361   1          return 1;
  362   1      }
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 7   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 7   
 
  363          
  364          uint8_t RTC_WriteDateTime(const RTC_DateTime *datetime)
@@ -446,7 +446,7 @@ line level    source
  422   1          datetime->year = (uint16_t)(2000 + year +
  423   1              ((rtc_data[5] & 0x80) ? 100 : 0));
  424   1          datetime->month = month;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 8   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 8   
 
  425   1          datetime->day = day;
  426   1          datetime->weekday = weekday;
@@ -511,7 +511,7 @@ MODULE INFORMATION:   STATIC OVERLAYABLE
    FAR CONST SIZE   =   ----    ----
 END OF MODULE INFORMATION.
 
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/27/2026 18:03:25 PAGE 9   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/28/2026 14:10:16 PAGE 9   
 
 
 C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

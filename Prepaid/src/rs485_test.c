@@ -31,7 +31,7 @@
 #define COMM_CONFIG_RECORD_VERSION 3
 #define BAUD_REGISTER_115200 0xFFFF
 #define PREPAID_EEPROM_OFFSET 0x0080
-#define PREPAID_RECORD_SIZE 60
+#define PREPAID_RECORD_SIZE 66
 #define PREPAID_SAVE_DELAY_MS 500UL
 
 #define PREPAID_CHANGE_COMPANY     0x01
@@ -42,6 +42,16 @@
 #define PREPAID_CHANGE_CONSUMPTION 0x20
 #define PREPAID_CHANGE_CREDIT      0x40
 #define PREPAID_CHANGE_SETTINGS    0x80
+
+static uint8_t Prepaid_IsConsumptionOffset(uint16_t offset)
+{
+    return (uint8_t)(offset == MAIN_KWH_CONSUMPTION_OFFSET ||
+        offset == MAIN_KVAH_CONSUMPTION_OFFSET ||
+        offset == DG_KWH_CONSUMPTION_OFFSET ||
+        offset == DG_KVAH_CONSUMPTION_OFFSET ||
+        offset == SOLAR_KWH_CONSUMPTION_OFFSET ||
+        offset == SOLAR_KVAH_CONSUMPTION_OFFSET);
+}
 
 #define I2C_SI                  0x08
 #define I2C_STO                 0x10
@@ -111,7 +121,7 @@ static uint8_t xdata comm_config_legacy_record[COMM_CONFIG_LEGACY_RECORD_SIZE];
 static uint16_t xdata comm_config_backup[COMM_CONFIG_WORD_COUNT];
 static uint8_t xdata prepaid_eeprom_record[PREPAID_RECORD_SIZE];
 static uint8_t xdata prepaid_eeprom_verify[PREPAID_RECORD_SIZE];
-static uint16_t prepaid_total_recharge_amount;
+static int32_t prepaid_total_recharge_amount;
 static int32_t prepaid_current_balance;
 static uint8_t prepaid_relay_sync_pending;
 static uint8_t prepaid_save_pending;
@@ -264,8 +274,12 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     }
     if (offset == BALANCE_OFFSET)
     {
-        return (uint8_t)(((uint32_t)prepaid_total_recharge_amount +
-            (uint32_t)value) <= 0xFFFFUL);
+        return 0;
+    }
+    if (offset == RECHARGE_INPUT_OFFSET)
+    {
+        /* Recharge writes are interpreted as signed 16-bit adjustments. */
+        return 1;
     }
     if (offset == TAMPER_EVENT_OFFSET)
     {
@@ -302,18 +316,17 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
             offset <= SOLAR_KVAH_RATE_OFFSET) ||
         offset == LOW_BALANCE_THRESHOLD_OFFSET ||
         offset == BACKLIGHT_TIMEOUT_OFFSET ||
-        (offset >= MAIN_CONSUMPTION_OFFSET &&
-            offset <= SOLAR_CONSUMPTION_OFFSET) ||
+        Prepaid_IsConsumptionOffset(offset) ||
         offset == LOAD_LIMIT_OFFSET || offset == TIME_LIMIT_OFFSET);
 }
 
 static uint8_t RS485_IsBillingParameterOffset(uint16_t offset)
 {
     return (uint8_t)(offset == BALANCE_OFFSET ||
+        offset == RECHARGE_INPUT_OFFSET ||
         (offset >= MAIN_KWH_RATE_OFFSET &&
             offset <= LOW_BALANCE_THRESHOLD_OFFSET) ||
-        (offset >= MAIN_CONSUMPTION_OFFSET &&
-            offset <= SOLAR_CONSUMPTION_OFFSET) ||
+        Prepaid_IsConsumptionOffset(offset) ||
         offset == BACKLIGHT_TIMEOUT_OFFSET ||
         offset == BILLING_PARAMETER_OFFSET ||
         (offset >= LOAD_LIMIT_OFFSET && offset <= DISCONNECT_MODE_OFFSET));
@@ -326,7 +339,7 @@ static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
     {
         return PREPAID_CHANGE_COMPANY;
     }
-    if (offset == BALANCE_OFFSET)
+    if (offset == RECHARGE_INPUT_OFFSET)
     {
         return PREPAID_CHANGE_CREDIT;
     }
@@ -348,8 +361,7 @@ static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
     {
         return PREPAID_CHANGE_BACKLIGHT;
     }
-    if (offset >= MAIN_CONSUMPTION_OFFSET &&
-        offset <= SOLAR_CONSUMPTION_OFFSET)
+    if (Prepaid_IsConsumptionOffset(offset))
     {
         return PREPAID_CHANGE_CONSUMPTION;
     }
@@ -410,8 +422,7 @@ static void Prepaid_ObserveConsumptionAfterDisconnect(
     uint16_t offset, uint16_t previous_value, uint16_t new_value,
     int16_t balance_before, uint8_t disconnected_before)
 {
-    if (offset >= MAIN_CONSUMPTION_OFFSET &&
-        offset <= SOLAR_CONSUMPTION_OFFSET &&
+    if (Prepaid_IsConsumptionOffset(offset) &&
         new_value > previous_value && balance_before <= 0 &&
         disconnected_before != 0 &&
         slave_holding_registers[CONSUMPTION_AFTER_DISCONNECT_OFFSET] == 0)
@@ -948,6 +959,14 @@ static void Prepaid_WriteRecordU16(uint8_t offset, uint16_t value)
     prepaid_eeprom_record[offset + 1] = (uint8_t)value;
 }
 
+static void Prepaid_WriteRecordU32(uint8_t offset, uint32_t value)
+{
+    prepaid_eeprom_record[offset] = (uint8_t)(value >> 24);
+    prepaid_eeprom_record[offset + 1] = (uint8_t)(value >> 16);
+    prepaid_eeprom_record[offset + 2] = (uint8_t)(value >> 8);
+    prepaid_eeprom_record[offset + 3] = (uint8_t)value;
+}
+
 static uint8_t PrepaidEeprom_ReadRecord(void)
 {
     uint8_t index;
@@ -1026,6 +1045,68 @@ static void Prepaid_SetBalance(int32_t balance)
     slave_holding_registers[BALANCE_OFFSET] = (uint16_t)(int16_t)balance;
 }
 
+static void Prepaid_UpdateTotalAmountRegister(void)
+{
+    int32_t total_amount;
+
+    total_amount = prepaid_total_recharge_amount;
+    if (total_amount > 32767L) total_amount = 32767L;
+    else if (total_amount < -32768L) total_amount = -32768L;
+    slave_holding_registers[TOTAL_AMOUNT_OFFSET] =
+        (uint16_t)(int16_t)total_amount;
+}
+
+static int32_t Prepaid_GetSelectedConsumptionCost(void)
+{
+    uint16_t main_consumption;
+    uint16_t dg_consumption;
+    uint16_t solar_consumption;
+    uint16_t main_rate;
+    uint16_t dg_rate;
+    uint16_t solar_rate;
+    uint32_t cost;
+    uint32_t component;
+
+    if (slave_holding_registers[BILLING_PARAMETER_OFFSET] ==
+        BILLING_MODE_KVAH)
+    {
+        main_consumption =
+            slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET];
+        dg_consumption = slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET];
+        solar_consumption =
+            slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET];
+        main_rate = slave_holding_registers[MAIN_KVAH_RATE_OFFSET];
+        dg_rate = slave_holding_registers[DG_KVAH_RATE_OFFSET];
+        solar_rate = slave_holding_registers[SOLAR_KVAH_RATE_OFFSET];
+    }
+    else if (slave_holding_registers[BILLING_PARAMETER_OFFSET] ==
+        BILLING_MODE_KWH)
+    {
+        main_consumption =
+            slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET];
+        dg_consumption = slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET];
+        solar_consumption =
+            slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET];
+        main_rate = slave_holding_registers[MAIN_KWH_RATE_OFFSET];
+        dg_rate = slave_holding_registers[DG_KWH_RATE_OFFSET];
+        solar_rate = slave_holding_registers[SOLAR_KWH_RATE_OFFSET];
+    }
+    else
+    {
+        return 0;
+    }
+
+    cost = (uint32_t)main_consumption * (uint32_t)main_rate;
+    if (cost > 0x7FFFFFFFUL) return 0x7FFFFFFFL;
+    component = (uint32_t)dg_consumption * (uint32_t)dg_rate;
+    if (component > (0x7FFFFFFFUL - cost)) return 0x7FFFFFFFL;
+    cost += component;
+    component = (uint32_t)solar_consumption * (uint32_t)solar_rate;
+    if (component > (0x7FFFFFFFUL - cost)) return 0x7FFFFFFFL;
+    cost += component;
+    return (int32_t)cost;
+}
+
 static int32_t Prepaid_SubtractConsumptionCost(int32_t balance,
                                                uint16_t consumption,
                                                uint16_t rate)
@@ -1044,6 +1125,11 @@ static int32_t Prepaid_SubtractConsumptionCost(int32_t balance,
         return (deficit >= 32768UL) ? -32768L : -(int32_t)deficit;
     }
 
+    if (balance <= -32768L)
+    {
+        return -32768L;
+    }
+
     deficit = (uint32_t)(-balance);
     if (cost >= (32768UL - deficit))
     {
@@ -1055,40 +1141,59 @@ static int32_t Prepaid_SubtractConsumptionCost(int32_t balance,
 static void Prepaid_RecomputeBalance(void)
 {
     int32_t balance;
+    int32_t total_deducted;
     uint16_t main_rate;
     uint16_t dg_rate;
     uint16_t solar_rate;
+    uint16_t main_consumption;
+    uint16_t dg_consumption;
+    uint16_t solar_consumption;
 
-    if (slave_holding_registers[BILLING_PARAMETER_OFFSET] > 1)
+    Prepaid_UpdateTotalAmountRegister();
+
+    if (slave_holding_registers[BILLING_PARAMETER_OFFSET] >
+        BILLING_MODE_KVAH)
     {
-        /* PF/kW/kVA/kVArh need meter sources and tariffs not in this map. */
+        /* This map has no rates or counters for PF, kW, kVA or kVArh. */
         Prepaid_SetBalance(prepaid_current_balance);
         prepaid_relay_sync_pending = 1;
         return;
     }
+
     if (slave_holding_registers[BILLING_PARAMETER_OFFSET] ==
         BILLING_MODE_KVAH)
     {
         main_rate = slave_holding_registers[MAIN_KVAH_RATE_OFFSET];
         dg_rate = slave_holding_registers[DG_KVAH_RATE_OFFSET];
         solar_rate = slave_holding_registers[SOLAR_KVAH_RATE_OFFSET];
+        main_consumption =
+            slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET];
+        dg_consumption = slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET];
+        solar_consumption =
+            slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET];
     }
     else
     {
         main_rate = slave_holding_registers[MAIN_KWH_RATE_OFFSET];
         dg_rate = slave_holding_registers[DG_KWH_RATE_OFFSET];
         solar_rate = slave_holding_registers[SOLAR_KWH_RATE_OFFSET];
+        main_consumption =
+            slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET];
+        dg_consumption = slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET];
+        solar_consumption =
+            slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET];
     }
+
     balance = prepaid_total_recharge_amount;
+    total_deducted = Prepaid_GetSelectedConsumptionCost();
+    slave_holding_registers[TOTAL_DEDUCTED_OFFSET] =
+        (total_deducted > 65535L) ? 65535 : (uint16_t)total_deducted;
+
     balance = Prepaid_SubtractConsumptionCost(balance,
-        slave_holding_registers[MAIN_CONSUMPTION_OFFSET],
-        main_rate);
+        main_consumption, main_rate);
+    balance = Prepaid_SubtractConsumptionCost(balance, dg_consumption, dg_rate);
     balance = Prepaid_SubtractConsumptionCost(balance,
-        slave_holding_registers[DG_CONSUMPTION_OFFSET],
-        dg_rate);
-    balance = Prepaid_SubtractConsumptionCost(balance,
-        slave_holding_registers[SOLAR_CONSUMPTION_OFFSET],
-        solar_rate);
+        solar_consumption, solar_rate);
     Prepaid_SetBalance(balance);
     prepaid_relay_sync_pending = 1;
 }
@@ -1142,6 +1247,10 @@ static void Prepaid_SetDefaults(void)
     prepaid_total_recharge_amount = 0;
     prepaid_current_balance = 0;
     slave_holding_registers[MAIN_KWH_RATE_OFFSET] = 0;
+    slave_holding_registers[LAST_RECHARGE_OFFSET] = 0;
+    slave_holding_registers[RECHARGE_INPUT_OFFSET] = 0;
+    slave_holding_registers[TOTAL_DEDUCTED_OFFSET] = 0;
+    slave_holding_registers[TOTAL_AMOUNT_OFFSET] = 0;
     slave_holding_registers[MAIN_KVAH_RATE_OFFSET] = 0;
     slave_holding_registers[DG_KWH_RATE_OFFSET] = 0;
     slave_holding_registers[DG_KVAH_RATE_OFFSET] = 0;
@@ -1150,9 +1259,12 @@ static void Prepaid_SetDefaults(void)
     slave_holding_registers[LOW_BALANCE_THRESHOLD_OFFSET] = 0;
     slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] = 0;
     slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET] = 0;
-    slave_holding_registers[MAIN_CONSUMPTION_OFFSET] = 0;
-    slave_holding_registers[DG_CONSUMPTION_OFFSET] = 0;
-    slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = 0;
+    slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET] = 0;
+    slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET] = 0;
+    slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET] = 0;
+    slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET] = 0;
+    slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET] = 0;
+    slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET] = 0;
     slave_holding_registers[BILLING_PARAMETER_OFFSET] = 0;
     slave_holding_registers[SLAVE_RELAY_COMMAND_OFFSET] = 1;
     slave_holding_registers[RELAY_DISCONNECT_STATUS_OFFSET] = 1;
@@ -1177,14 +1289,30 @@ static void PrepaidEeprom_Load(void)
 
     Prepaid_SetDefaults();
     if (!meter_eeprom_present || !PrepaidEeprom_ReadRecord()) return;
-    crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
     version = prepaid_eeprom_record[2];
+    if (version < 6)
+    {
+        /* Versions 1..5 used the original 60-byte prepaid record. */
+        crc = Modbus_Crc16(prepaid_eeprom_record, 58);
+        if (prepaid_eeprom_record[58] != (uint8_t)crc ||
+            prepaid_eeprom_record[59] != (uint8_t)(crc >> 8))
+        {
+            return;
+        }
+    }
+    else
+    {
+        crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
+    }
     if (prepaid_eeprom_record[0] != 0x50 || prepaid_eeprom_record[1] != 0x50 ||
-        (version != 1 && version != 2 && version != 3 && version != 4) ||
+        (version != 1 && version != 2 && version != 3 && version != 4 &&
+            version != 5 && version != 6) ||
         (version == 1 && (prepaid_eeprom_record[3] & 0xFE) != 0) ||
         (version >= 2 && prepaid_eeprom_record[3] != 0) ||
-        prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
-        prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
+        (version >= 6 &&
+            (prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
+             prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] !=
+                (uint8_t)(crc >> 8))))
     {
         return;
     }
@@ -1224,7 +1352,7 @@ static void PrepaidEeprom_Load(void)
             Prepaid_SetDefaults();
             return;
         }
-        if (version == 4)
+        if (version >= 4)
         {
             slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] =
                 Prepaid_ReadRecordU16(48);
@@ -1276,7 +1404,36 @@ static void PrepaidEeprom_Load(void)
             slave_holding_registers[SOLAR_CONSUMPTION_OFFSET] = value;
         }
     }
-    if (version >= 3)
+    if (version >= 6)
+    {
+        slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET] =
+            Prepaid_ReadRecordU16(58);
+        slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET] =
+            Prepaid_ReadRecordU16(60);
+        slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET] =
+            Prepaid_ReadRecordU16(62);
+    }
+    else if (slave_holding_registers[BILLING_PARAMETER_OFFSET] ==
+        BILLING_MODE_KVAH)
+    {
+        slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET] =
+            slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET];
+        slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET] =
+            slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET];
+        slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET] =
+            slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET];
+        slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET] = 0;
+        slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET] = 0;
+        slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET] = 0;
+    }
+    if (version >= 5)
+    {
+        prepaid_total_recharge_amount =
+            (int32_t)Prepaid_ReadRecordU32(52);
+        slave_holding_registers[LAST_RECHARGE_OFFSET] =
+            Prepaid_ReadRecordU16(56);
+    }
+    else if (version >= 3)
     {
         prepaid_total_recharge_amount = Prepaid_ReadRecordU16(14);
     }
@@ -1305,7 +1462,7 @@ static void PrepaidEeprom_Load(void)
             0xFFFFUL : (migrated_recharge + cost);
         prepaid_total_recharge_amount = (uint16_t)migrated_recharge;
     }
-    if (version != 4) PrepaidEeprom_RequestSave();
+    if (version != 6) PrepaidEeprom_RequestSave();
     Prepaid_RecomputeBalance();
 }
 
@@ -1317,7 +1474,7 @@ static void PrepaidEeprom_BuildRecord(void)
 
     prepaid_eeprom_record[0] = 0x50;
     prepaid_eeprom_record[1] = 0x50;
-    prepaid_eeprom_record[2] = 4;
+    prepaid_eeprom_record[2] = 6;
     prepaid_eeprom_record[3] = 0;
     for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
     {
@@ -1330,7 +1487,7 @@ static void PrepaidEeprom_BuildRecord(void)
     {
         prepaid_eeprom_record[4 + index] = 0;
     }
-    Prepaid_WriteRecordU16(14, prepaid_total_recharge_amount);
+    Prepaid_WriteRecordU16(14, (uint16_t)prepaid_total_recharge_amount);
     Prepaid_WriteRecordU16(16,
         slave_holding_registers[MAIN_KWH_RATE_OFFSET]);
     Prepaid_WriteRecordU16(18,
@@ -1367,10 +1524,15 @@ static void PrepaidEeprom_BuildRecord(void)
         slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET]);
     Prepaid_WriteRecordU16(50,
         slave_holding_registers[CONSUMPTION_AFTER_DISCONNECT_OFFSET]);
-    for (index = 52; index < PREPAID_RECORD_SIZE - 2; index++)
-    {
-        prepaid_eeprom_record[index] = 0;
-    }
+    Prepaid_WriteRecordU32(52, (uint32_t)prepaid_total_recharge_amount);
+    Prepaid_WriteRecordU16(56,
+        slave_holding_registers[LAST_RECHARGE_OFFSET]);
+    Prepaid_WriteRecordU16(58,
+        slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET]);
+    Prepaid_WriteRecordU16(60,
+        slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET]);
+    Prepaid_WriteRecordU16(62,
+        slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET]);
     crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] = (uint8_t)crc;
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
@@ -1418,15 +1580,43 @@ static void Prepaid_CommitChanges(uint8_t change_flags)
 {
     if (change_flags & PREPAID_CHANGE_CREDIT)
     {
-        uint16_t recharge_amount;
+        int16_t recharge_adjustment;
 
-        recharge_amount = slave_holding_registers[BALANCE_OFFSET];
-        prepaid_total_recharge_amount = (uint16_t)(
-            prepaid_total_recharge_amount + recharge_amount);
-        if (slave_holding_registers[BILLING_PARAMETER_OFFSET] >
-            BILLING_MODE_KVAH)
+        recharge_adjustment =
+            (int16_t)slave_holding_registers[RECHARGE_INPUT_OFFSET];
+        slave_holding_registers[LAST_RECHARGE_OFFSET] =
+            (uint16_t)recharge_adjustment;
+        if (recharge_adjustment == 0)
         {
-            Prepaid_SetBalance(prepaid_current_balance + recharge_amount);
+            /* Clear the current balance while keeping cumulative usage. */
+            prepaid_total_recharge_amount =
+                Prepaid_GetSelectedConsumptionCost();
+            if (slave_holding_registers[BILLING_PARAMETER_OFFSET] >
+                BILLING_MODE_KVAH)
+            {
+                prepaid_total_recharge_amount = 0;
+                Prepaid_SetBalance(0);
+            }
+        }
+        else
+        {
+            if (recharge_adjustment > 0 &&
+                prepaid_total_recharge_amount >
+                    (0x7FFFFFFFL - recharge_adjustment))
+            {
+                prepaid_total_recharge_amount = 0x7FFFFFFFL;
+            }
+            else if (recharge_adjustment < 0 &&
+                prepaid_total_recharge_amount <
+                    (-0x7FFFFFFFL - 1L - recharge_adjustment))
+            {
+                prepaid_total_recharge_amount = -0x7FFFFFFFL - 1L;
+            }
+            else
+            {
+                prepaid_total_recharge_amount +=
+                    (int32_t)recharge_adjustment;
+            }
         }
     }
     if (change_flags & (PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION |
@@ -1474,9 +1664,9 @@ uint16_t RS485_GetBillingParameterValue(uint16_t offset)
     {
         return 0;
     }
-    if (offset == BALANCE_OFFSET)
+    if (offset == RECHARGE_INPUT_OFFSET)
     {
-        return slave_holding_registers[BALANCE_OFFSET];
+        return slave_holding_registers[RECHARGE_INPUT_OFFSET];
     }
     return slave_holding_registers[offset];
 }
@@ -1500,12 +1690,8 @@ uint8_t RS485_SetBillingParameter(uint16_t offset, uint16_t value)
     Prepaid_ObserveConsumptionAfterDisconnect(offset,
         slave_holding_registers[offset], value, balance_before_write,
         disconnected_before_write);
-    if (offset == BALANCE_OFFSET)
+    if (offset == RECHARGE_INPUT_OFFSET)
     {
-        if (value == 0)
-        {
-            return 1;
-        }
         slave_holding_registers[offset] = value;
     }
     else
@@ -1966,7 +2152,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             Prepaid_ObserveConsumptionAfterDisconnect(start_address,
                 slave_holding_registers[start_address], value,
                 balance_before_write, disconnected_before_write);
-            if (start_address == BALANCE_OFFSET ||
+            if (start_address == RECHARGE_INPUT_OFFSET ||
                 slave_holding_registers[start_address] != value)
             {
                 change_flags |= Prepaid_ChangeFlagForOffset(start_address);
@@ -2052,7 +2238,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             {
                 config_touched = 1;
             }
-            if (register_offset == BALANCE_OFFSET ||
+            if (register_offset == RECHARGE_INPUT_OFFSET ||
                 slave_holding_registers[register_offset] != value)
             {
                 change_flags |= Prepaid_ChangeFlagForOffset(register_offset);
@@ -2464,4 +2650,3 @@ void RS485_Poll(void)
     MeterEeprom_Service();
     PrepaidEeprom_Service();
 }
-
