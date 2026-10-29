@@ -227,17 +227,6 @@ static void LCD_UI_ShowTotalDeducted(void)
     LCD_UI_PadLine(1, used);
 }
 
-static void LCD_UI_ShowTotalAmount(void)
-{
-    uint8_t used;
-    int16_t amount;
-    amount = (int16_t)slave_holding_registers[TOTAL_AMOUNT_OFFSET];
-    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Total Amount");
-    LCD_UI_PadLine(0, 12); LCD_SetCursor(1, 0); LCD_WriteText("Amount: ");
-    used = (uint8_t)(8 + LCD_UI_WriteSignedInteger(amount));
-    LCD_UI_PadLine(1, used);
-}
-
 void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
 {
     switch (screen_number)
@@ -266,9 +255,7 @@ void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
             LCD_UI_ShowBillingParameter(); break;
         case LCD_UI_SCREEN_16_LAST_RECHARGE:
             LCD_UI_ShowLastRecharge(); break;
-        case LCD_UI_SCREEN_17_TOTAL_AMOUNT:
-            LCD_UI_ShowTotalAmount(); break;
-        case LCD_UI_SCREEN_18_TOTAL_DEDUCTED:
+        case LCD_UI_SCREEN_17_TOTAL_DEDUCTED:
             LCD_UI_ShowTotalDeducted(); break;
         default:
             LCD_UI_ShowConsumptionFlag(); break;

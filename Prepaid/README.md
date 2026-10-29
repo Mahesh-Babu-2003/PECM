@@ -75,22 +75,30 @@ and selected prepaid load and balance values.
   | `40032` | Load limit | Read/write unsigned integer; retained in either disconnect mode |
   | `40033` | Time limit | Read/write unsigned integer; retained in either disconnect mode |
   | `40034` | Disconnect mode | Read/write: `1` = Max Load mode, `0` = Max Time mode; selects which limit is active without clearing either value |
-  | `40035` | BMS relay override | Read/write and saved: `0` = automatic balance control; `1` = at zero/negative balance, allow BMS relay commands and preserve current relay states |
+  | `40035` | BMS relay override | Read/write and saved for compatibility; it cannot bypass the automatic relay cutoff when balance is zero or negative |
   | `40036` | Consumption after disconnection | Firmware latches `1` when a cumulative consumption total rises while balance is at/below zero and all relays are off; BMS writes `0` to acknowledge/clear |
-  | `40037` | RTC year | Read-only; set the clock from the PCB buttons |
+  | `40037` | RTC year | Read-only for single-register writes. Set from Modbus by writing all six registers `40037`–`40042` in one function 16 request: year, month, day, hour, minute, second. The board validates the date, sets the RTC, and saves the EEPROM snapshot. Invalid date/time returns exception `03`; an active LCD RTC editor returns `06`; RTC or EEPROM write failure returns `04`. The PCB-button editor remains supported. |
   | `40038` | RTC month | Read-only |
   | `40039` | RTC day | Read-only |
   | `40040` | RTC hour | Read-only |
   | `40041` | RTC minute | Read-only |
   | `40042` | RTC second | Read-only |
   | `40043` | Last recharge amount | Read-only signed 16-bit value from the most recent recharge input |
-  | `40044` | Recharge input | Write a signed 16-bit adjustment: positive adds credit, negative subtracts credit, and `0` resets the balance to zero while retaining cumulative consumption |
-  | `40045` | Total amount deducted | Read-only sum for the selected kWh/kVAh billing mode, clamped to 65535 |
-  | `40046` | Total amount | Read-only signed 16-bit credit total used to calculate the balance |
+  | `40044` | Recharge input | Write a signed 16-bit adjustment: positive adds credit, negative subtracts credit; `0` adds no credit and does not reset billing |
+  | `40045` | Total amount deducted | Read-only selected-mode cost since the latest nonzero recharge, clamped to 65535; resets to `0` on nonzero recharge |
+  | `40046` | Clock synchronization | Write `1` to refresh the board RTC values in `40037`–`40042`; read `1` for success or `2` if the board RTC could not be read; write `0` to clear the status |
   | `40047`–`40050` | Reserved | Read as zero; writes are rejected |
 
-  Register `40013` is calculated as `total amount (40046) - total amount
-  deducted (40045)`.
+  Register `40013` is the remaining balance. Recharge writes to `40044` add
+  credit, and consumption cost is deducted according to the selected billing
+  mode. The balance calculation accounts for cumulative meter consumption only
+  once. Register `40045` shows the selected-mode cost since the most recent
+  nonzero recharge. A nonzero recharge resets it to `0` and clears only the
+  selected billing mode's three source totals: `40023`, `40025`, and `40027`
+  for kWh, or `40024`, `40026`, and `40028` for kVAh. The other mode's totals
+  are unchanged. Writing `0` to `40044` does not change the balance or clear
+  consumption; new consumption continues to be deducted.
+  The accumulated credit is kept internally and is not exposed as a register.
   When `40030 = 0`, the deduction uses the kWh counters and rates: Mains
   (`40023 × 40014`), DG (`40025 × 40016`), and Solar (`40027 × 40018`). When
   `40030 = 1`, it uses the kVAh counters and rates: Mains (`40024 × 40015`), DG
@@ -100,17 +108,17 @@ and selected prepaid load and balance values.
   result is negative
   when calculated consumption cost exceeds the total credited amount. Write a
   signed recharge adjustment to `40044`; positive values add credit, negative
-  values reduce credit, and writing `0` resets the current balance to zero
-  without clearing cumulative consumption. Register `40013` returns the signed
-  remaining balance. Register `40046` reports the signed credit total used by
-  the calculation. Writes to `40044`, rate writes,
+  values reduce credit, and `0` means no recharge. Register `40013` returns the
+  signed remaining balance. Writes to `40044`, rate writes,
   and cumulative-consumption writes trigger recalculation. The result is signed
   16-bit, clamped to `-32768` through `32767`; configure Modscan to display
   `40013` as signed 16-bit to see negative balances. Rates and consumption use
   unsigned integer values without decimal scaling; `40044` is signed 16-bit.
   Increasing a cumulative consumption register triggers recalculation, and the
-  corresponding consumption cost further reduces the remaining balance. The
-  low-balance alert is `1` when the balance is negative or at or below the
+  additional consumption cost further reduces the remaining balance. For
+  example, a balance of `-1653` followed by a recharge of `2000` becomes `347`;
+  `40045` resets to `0` and then reports only subsequent billed consumption.
+  The low-balance alert is `1` when the balance is negative or at or below the
   configured threshold, otherwise `0`. While this alert is active, the buzzer
   sounds for half a second three times, with half-second gaps, and starts the
   next burst every 30 seconds. It stops when the alert clears. Relay control follows the calculated
@@ -133,9 +141,9 @@ and selected prepaid load and balance values.
   measurement of the physical contact. At startup, firmware synchronizes the
   relays with the calculated balance. Register `40031` reflects these commanded
   states; a mixed relay state reports `0` because not all three are off.
-  With `40035 = 1`, low-balance automation preserves the current relay states
-  and allows the BMS to issue relay commands; it does not turn relays on by
-  itself. Register `40036` latches if a mains, DG, or solar cumulative total
+  A zero or negative balance always disconnects all three relays and blocks
+  BMS relay-on commands, regardless of `40035`. Register `40036` latches if a
+  mains, DG, or solar cumulative total
   increases through a write to the cumulative registers `40023`–`40028` while
   all relays are off at zero or negative balance. The flag is saved across
   restarts, and the BMS can clear it by writing `0` to `40036`.
@@ -145,25 +153,29 @@ and selected prepaid load and balance values.
   Mains kVAh, DG kWh, DG kVAh, Solar kWh, and Solar kVAh. Screen 10 is the
   low-balance alert (shown only when `40021 = 1`), screen 11 low-balance
   threshold, screen 12 Max Load/Max Time, screen 13 tamper event, screen 14 BMS
-  relay override, screen 15 billing parameter, screen 16 last recharge, screen
-   17 total amount (`40046`), and screen 18 total amount deducted (`40045`).
+  relay override, screen 15 billing parameter, screen 16 last recharge, and
+  screen 17 total amount deducted (`40045`).
    The billing screen displays `0: kWh`, `1: kVAh`, `2: PF`, `3: kW`,
   `4: kVA`, or `5: kVArh`. The RTC editor is screen ID 0. Each customer screen
   stays visible for three seconds; a short SW1 press advances immediately. The
   load/time screen uses register `40034` to select `Max Load` (`1`, showing
   `40032`) or `Max Time` (`0`, showing `40033`). Other screen data comes from
   customer ID `40008`–`40012`, balance `40013`, all-load status `40001`,
-  consumption registers `40023`–`40028`, threshold `40020`, total amount
-  `40046`, and total amount deducted `40045`.
+  consumption registers `40023`–`40028`, threshold `40020`, and total amount
+  deducted `40045`.
 - Set the RTC from the PCB buttons: press SW2 three times within two seconds
   to enter edit mode. SW1 selects each digit in `DD:MM:YYYY HH:MM:SS` order;
   SW2 increases the selected digit and SW3 decreases it when released. Hold
   SW3 for three seconds to write the edited time to the RTC and EEPROM and
   return to the customer-screen loop. Modbus registers `40037`–`40042` update
   to the saved date and time. Time uses a 24-hour clock. The registers expose
-  read-only live year, month, day, hour, minute, and second. Recharge/credit
-  registers are `40043`–`40046`;
-  `40047`–`40050` are reserved.
+  read-only live year, month, day, hour, minute, and second. Recharge and
+  synchronization registers are `40043`–`40046`; `40047`–`40050` are reserved.
+  To synchronize the BMS clock to the board clock, the BMS writes `1` to
+  `40046`, waits for status `1`, then reads the board date and time from
+  `40037`–`40042` and sets
+  its own RTC from those values. Status `2` means the board RTC read failed;
+  write `0` to clear the status before or after a synchronization.
 - Each debounced switch press gives a short buzzer beep. Saving the clock writes
   an RTC snapshot to EEPROM address `0x0040`, separate from the meter record at
   `0x0100`, and reads it back to verify the save. If the RTC is invalid at

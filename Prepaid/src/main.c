@@ -27,7 +27,7 @@ static uint16_t backlight_idle_ms;
 static uint8_t low_balance_buzzer_state;
 static uint8_t low_balance_beep_count;
 static uint16_t low_balance_buzzer_timer;
-static uint8_t rtc_edit_active;
+uint8_t rtc_edit_active;
 static uint8_t rtc_edit_digit;
 static uint8_t rtc_edit_entry_press_count;
 static uint16_t rtc_edit_entry_timer;

@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/28/2026 16:46:31 PAGE 1   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/29/2026 15:28:03 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE BOARD_IO
@@ -62,7 +62,7 @@ line level    source
   50   1          RELAY_RESET_3_PIN = 0;
   51   1          SHIFT_DATA_PIN = 0;
   52   1          SHIFT_CLOCK_PIN = 0;
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/28/2026 16:46:31 PAGE 2   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/29/2026 15:28:03 PAGE 2   
 
   53   1          SHIFT_LATCH_PIN = 0;
   54   1          BOARD_TAMPER_PIN = 1;
@@ -126,7 +126,7 @@ line level    source
  112   2          }
  113   1      }
  114          
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/28/2026 16:46:31 PAGE 3   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/29/2026 15:28:03 PAGE 3   
 
  115          static void Board_RelayCoilsOff(void)
  116          {
@@ -190,7 +190,7 @@ line level    source
  174   1          uint8_t bit_index;
  175   1      
  176   1          SFRS = 0;
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/28/2026 16:46:31 PAGE 4   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/29/2026 15:28:03 PAGE 4   
 
  177   1          SHIFT_LATCH_PIN = 0;
  178   1          for (bit_index = 0; bit_index < 8; bit_index++)
@@ -254,7 +254,7 @@ line level    source
  236   3                  switch_debounce_counter[button_index] = 0;
  237   3              }
  238   2              button_mask <<= 1;
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/28/2026 16:46:31 PAGE 5   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/29/2026 15:28:03 PAGE 5   
 
  239   2          }
  240   1      
@@ -318,7 +318,7 @@ line level    source
  298          void Board_Beep(uint16_t milliseconds)
  299          {
  300   1          Board_SetBuzzer(1);
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/28/2026 16:46:31 PAGE 6   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/29/2026 15:28:03 PAGE 6   
 
  301   1          Board_DelayMs(milliseconds);
  302   1          Board_SetBuzzer(0);

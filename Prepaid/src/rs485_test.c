@@ -31,7 +31,7 @@
 #define COMM_CONFIG_RECORD_VERSION 3
 #define BAUD_REGISTER_115200 0xFFFF
 #define PREPAID_EEPROM_OFFSET 0x0080
-#define PREPAID_RECORD_SIZE 66
+#define PREPAID_RECORD_SIZE 70
 #define PREPAID_SAVE_DELAY_MS 500UL
 
 #define PREPAID_CHANGE_COMPANY     0x01
@@ -51,6 +51,23 @@ static uint8_t Prepaid_IsConsumptionOffset(uint16_t offset)
         offset == DG_KVAH_CONSUMPTION_OFFSET ||
         offset == SOLAR_KWH_CONSUMPTION_OFFSET ||
         offset == SOLAR_KVAH_CONSUMPTION_OFFSET);
+}
+
+static void Prepaid_ResetConsumptionTotals(void)
+{
+    if (slave_holding_registers[BILLING_PARAMETER_OFFSET] == BILLING_MODE_KWH)
+    {
+        slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET] = 0;
+        slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET] = 0;
+        slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET] = 0;
+    }
+    else if (slave_holding_registers[BILLING_PARAMETER_OFFSET] ==
+        BILLING_MODE_KVAH)
+    {
+        slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET] = 0;
+        slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET] = 0;
+        slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET] = 0;
+    }
 }
 
 #define I2C_SI                  0x08
@@ -122,6 +139,7 @@ static uint16_t xdata comm_config_backup[COMM_CONFIG_WORD_COUNT];
 static uint8_t xdata prepaid_eeprom_record[PREPAID_RECORD_SIZE];
 static uint8_t xdata prepaid_eeprom_verify[PREPAID_RECORD_SIZE];
 static int32_t prepaid_total_recharge_amount;
+static int32_t prepaid_deduction_baseline;
 static int32_t prepaid_current_balance;
 static uint8_t prepaid_relay_sync_pending;
 static uint8_t prepaid_save_pending;
@@ -239,8 +257,7 @@ static uint8_t RS485_IsCommunicationConfigOffset(uint16_t offset)
 }
 
 static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
-                                                   uint16_t value,
-                                                   uint16_t bms_override)
+                                                   uint16_t value)
 {
     if (offset >= SLAVE_REGISTER_COUNT)
     {
@@ -249,7 +266,7 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     if (offset == SLAVE_RELAY_COMMAND_OFFSET)
     {
         if (value > 1) return 0;
-        return (uint8_t)(value == 1 || bms_override != 0 ||
+        return (uint8_t)(value == 1 ||
             (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0);
     }
     if (offset == SLAVE_PORT1_BAUD_OFFSET ||
@@ -298,6 +315,10 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     if (offset == CONSUMPTION_AFTER_DISCONNECT_OFFSET)
     {
         return (uint8_t)(value == 0);
+    }
+    if (offset == RTC_SYNC_OFFSET)
+    {
+        return (uint8_t)(value <= 1);
     }
     if (offset >= RTC_LIVE_YEAR_OFFSET && offset < SLAVE_HOLDING_REGISTER_COUNT)
     {
@@ -452,6 +473,19 @@ void RS485_UpdateLiveRtcRegisters(void)
     slave_holding_registers[RTC_LIVE_HOUR_OFFSET] = rtc_datetime.hours;
     slave_holding_registers[RTC_LIVE_MINUTE_OFFSET] = rtc_datetime.minutes;
     slave_holding_registers[RTC_LIVE_SECOND_OFFSET] = rtc_datetime.seconds;
+}
+
+static void RS485_ServiceClockSyncRequest(uint16_t request)
+{
+    if (request == 0)
+    {
+        slave_holding_registers[RTC_SYNC_OFFSET] = 0;
+        return;
+    }
+
+    slave_holding_registers[RTC_SYNC_OFFSET] =
+        RTC_ReadDateTime(&rtc_datetime) ? 1 : 2;
+    RS485_UpdateLiveRtcRegisters();
 }
 
 static void RS485_SendByte(uint8_t port, uint8_t value)
@@ -1045,17 +1079,6 @@ static void Prepaid_SetBalance(int32_t balance)
     slave_holding_registers[BALANCE_OFFSET] = (uint16_t)(int16_t)balance;
 }
 
-static void Prepaid_UpdateTotalAmountRegister(void)
-{
-    int32_t total_amount;
-
-    total_amount = prepaid_total_recharge_amount;
-    if (total_amount > 32767L) total_amount = 32767L;
-    else if (total_amount < -32768L) total_amount = -32768L;
-    slave_holding_registers[TOTAL_AMOUNT_OFFSET] =
-        (uint16_t)(int16_t)total_amount;
-}
-
 static int32_t Prepaid_GetSelectedConsumptionCost(void)
 {
     uint16_t main_consumption;
@@ -1149,12 +1172,11 @@ static void Prepaid_RecomputeBalance(void)
     uint16_t dg_consumption;
     uint16_t solar_consumption;
 
-    Prepaid_UpdateTotalAmountRegister();
-
     if (slave_holding_registers[BILLING_PARAMETER_OFFSET] >
         BILLING_MODE_KVAH)
     {
         /* This map has no rates or counters for PF, kW, kVA or kVArh. */
+        slave_holding_registers[TOTAL_DEDUCTED_OFFSET] = 0;
         Prepaid_SetBalance(prepaid_current_balance);
         prepaid_relay_sync_pending = 1;
         return;
@@ -1186,6 +1208,14 @@ static void Prepaid_RecomputeBalance(void)
 
     balance = prepaid_total_recharge_amount;
     total_deducted = Prepaid_GetSelectedConsumptionCost();
+    if (total_deducted > prepaid_deduction_baseline)
+    {
+        total_deducted -= prepaid_deduction_baseline;
+    }
+    else
+    {
+        total_deducted = 0;
+    }
     slave_holding_registers[TOTAL_DEDUCTED_OFFSET] =
         (total_deducted > 65535L) ? 65535 : (uint16_t)total_deducted;
 
@@ -1206,12 +1236,6 @@ static void Prepaid_ServiceBalanceRelays(void)
 
     if (!prepaid_relay_sync_pending) return;
     prepaid_relay_sync_pending = 0;
-    if ((int16_t)slave_holding_registers[BALANCE_OFFSET] <= 0 &&
-        slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0)
-    {
-        Prepaid_UpdateRelayDisconnectStatus();
-        return;
-    }
     desired_state = ((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0) ?
         1 : 0;
     relays_changed = 0;
@@ -1245,12 +1269,13 @@ static void Prepaid_SetDefaults(void)
     slave_holding_registers[COMPANY_NAME_FIRST_OFFSET] = 0x5045;
     slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + 1] = 0x4D43;
     prepaid_total_recharge_amount = 0;
+    prepaid_deduction_baseline = 0;
     prepaid_current_balance = 0;
     slave_holding_registers[MAIN_KWH_RATE_OFFSET] = 0;
     slave_holding_registers[LAST_RECHARGE_OFFSET] = 0;
     slave_holding_registers[RECHARGE_INPUT_OFFSET] = 0;
     slave_holding_registers[TOTAL_DEDUCTED_OFFSET] = 0;
-    slave_holding_registers[TOTAL_AMOUNT_OFFSET] = 0;
+    slave_holding_registers[RTC_SYNC_OFFSET] = 0;
     slave_holding_registers[MAIN_KVAH_RATE_OFFSET] = 0;
     slave_holding_registers[DG_KWH_RATE_OFFSET] = 0;
     slave_holding_registers[DG_KVAH_RATE_OFFSET] = 0;
@@ -1300,19 +1325,29 @@ static void PrepaidEeprom_Load(void)
             return;
         }
     }
-    else
+    else if (version == 6)
+    {
+        crc = Modbus_Crc16(prepaid_eeprom_record, 64);
+        if (prepaid_eeprom_record[64] != (uint8_t)crc ||
+            prepaid_eeprom_record[65] != (uint8_t)(crc >> 8))
+        {
+            return;
+        }
+    }
+    else if (version == 7)
     {
         crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
+        if (prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
+            prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
+        {
+            return;
+        }
     }
     if (prepaid_eeprom_record[0] != 0x50 || prepaid_eeprom_record[1] != 0x50 ||
         (version != 1 && version != 2 && version != 3 && version != 4 &&
-            version != 5 && version != 6) ||
+            version != 5 && version != 6 && version != 7) ||
         (version == 1 && (prepaid_eeprom_record[3] & 0xFE) != 0) ||
-        (version >= 2 && prepaid_eeprom_record[3] != 0) ||
-        (version >= 6 &&
-            (prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
-             prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] !=
-                (uint8_t)(crc >> 8))))
+        (version >= 2 && prepaid_eeprom_record[3] != 0))
     {
         return;
     }
@@ -1462,7 +1497,21 @@ static void PrepaidEeprom_Load(void)
             0xFFFFUL : (migrated_recharge + cost);
         prepaid_total_recharge_amount = (uint16_t)migrated_recharge;
     }
-    if (version != 6) PrepaidEeprom_RequestSave();
+    if (version >= 7)
+    {
+        cost = Prepaid_ReadRecordU32(64);
+        if (cost > 0x7FFFFFFFUL)
+        {
+            Prepaid_SetDefaults();
+            return;
+        }
+        prepaid_deduction_baseline = (int32_t)cost;
+    }
+    else
+    {
+        prepaid_deduction_baseline = 0;
+    }
+    if (version != 7) PrepaidEeprom_RequestSave();
     Prepaid_RecomputeBalance();
 }
 
@@ -1474,7 +1523,7 @@ static void PrepaidEeprom_BuildRecord(void)
 
     prepaid_eeprom_record[0] = 0x50;
     prepaid_eeprom_record[1] = 0x50;
-    prepaid_eeprom_record[2] = 6;
+    prepaid_eeprom_record[2] = 7;
     prepaid_eeprom_record[3] = 0;
     for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
     {
@@ -1533,6 +1582,7 @@ static void PrepaidEeprom_BuildRecord(void)
         slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET]);
     Prepaid_WriteRecordU16(62,
         slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET]);
+    Prepaid_WriteRecordU32(64, (uint32_t)prepaid_deduction_baseline);
     crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] = (uint8_t)crc;
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
@@ -1586,37 +1636,12 @@ static void Prepaid_CommitChanges(uint8_t change_flags)
             (int16_t)slave_holding_registers[RECHARGE_INPUT_OFFSET];
         slave_holding_registers[LAST_RECHARGE_OFFSET] =
             (uint16_t)recharge_adjustment;
-        if (recharge_adjustment == 0)
+        if (recharge_adjustment != 0)
         {
-            /* Clear the current balance while keeping cumulative usage. */
-            prepaid_total_recharge_amount =
-                Prepaid_GetSelectedConsumptionCost();
-            if (slave_holding_registers[BILLING_PARAMETER_OFFSET] >
-                BILLING_MODE_KVAH)
-            {
-                prepaid_total_recharge_amount = 0;
-                Prepaid_SetBalance(0);
-            }
-        }
-        else
-        {
-            if (recharge_adjustment > 0 &&
-                prepaid_total_recharge_amount >
-                    (0x7FFFFFFFL - recharge_adjustment))
-            {
-                prepaid_total_recharge_amount = 0x7FFFFFFFL;
-            }
-            else if (recharge_adjustment < 0 &&
-                prepaid_total_recharge_amount <
-                    (-0x7FFFFFFFL - 1L - recharge_adjustment))
-            {
-                prepaid_total_recharge_amount = -0x7FFFFFFFL - 1L;
-            }
-            else
-            {
-                prepaid_total_recharge_amount +=
-                    (int32_t)recharge_adjustment;
-            }
+            prepaid_total_recharge_amount = prepaid_current_balance +
+                (int32_t)recharge_adjustment;
+            prepaid_deduction_baseline = 0;
+            Prepaid_ResetConsumptionTotals();
         }
     }
     if (change_flags & (PREPAID_CHANGE_CREDIT | PREPAID_CHANGE_CONSUMPTION |
@@ -1678,8 +1703,7 @@ uint8_t RS485_SetBillingParameter(uint16_t offset, uint16_t value)
     uint8_t disconnected_before_write;
 
     if (!RS485_IsBillingParameterOffset(offset) ||
-        !RS485_IsWritableRegisterValueValid(offset, value,
-            slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET]))
+        !RS485_IsWritableRegisterValueValid(offset, value))
     {
         return 0;
     }
@@ -2003,6 +2027,107 @@ static uint16_t RS485_ReadActiveCommunicationRegister(uint16_t offset)
     }
 }
 
+extern uint8_t rtc_edit_active;
+
+static uint8_t RS485_DaysInMonth(uint16_t year, uint8_t month)
+{
+    static const uint8_t days[12] =
+        {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+    if (month == 2 && ((year % 4 == 0 && year % 100 != 0) ||
+        year % 400 == 0))
+    {
+        return 29;
+    }
+    return days[month - 1];
+}
+
+static uint8_t RS485_CalculateWeekday(uint16_t year, uint8_t month,
+                                      uint8_t day)
+{
+    uint16_t century_year;
+    uint16_t century;
+    uint16_t weekday;
+
+    if (month < 3)
+    {
+        month += 12;
+        year--;
+    }
+    century_year = (uint16_t)(year % 100);
+    century = (uint16_t)(year / 100);
+    weekday = (uint16_t)((day + (13 * (month + 1)) / 5 + century_year +
+        (century_year / 4) + (century / 4) + (5 * century)) % 7);
+    return (uint8_t)((weekday + 6) % 7);
+}
+
+static void RS485_HandleRtcWrite(uint8_t function, uint16_t start_address)
+{
+    RTC_DateTime new_time;
+    uint16_t field[6];
+    uint8_t index;
+
+    for (index = 0; index < 6; index++)
+    {
+        field[index] = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
+            port1_rx_buffer[8 + (index * 2)];
+    }
+    if (rtc_edit_active)
+    {
+        Modbus_SendException(function, 0x06);
+        return;
+    }
+    if (field[0] < 2000 || field[0] > 2199 || field[1] < 1 ||
+        field[1] > 12 || field[2] < 1 ||
+        field[2] > RS485_DaysInMonth(field[0], (uint8_t)field[1]) ||
+        field[3] > 23 || field[4] > 59 || field[5] > 59)
+    {
+        Modbus_SendException(function, 0x03);
+        return;
+    }
+
+    new_time.year = field[0];
+    new_time.month = (uint8_t)field[1];
+    new_time.day = (uint8_t)field[2];
+    new_time.hours = (uint8_t)field[3];
+    new_time.minutes = (uint8_t)field[4];
+    new_time.seconds = (uint8_t)field[5];
+    new_time.weekday = RS485_CalculateWeekday(new_time.year, new_time.month,
+        new_time.day);
+    if (!RTC_WriteDateTime(&new_time))
+    {
+        Modbus_SendException(function, 0x04);
+        return;
+    }
+
+    rtc_datetime.year = new_time.year;
+    rtc_datetime.month = new_time.month;
+    rtc_datetime.day = new_time.day;
+    rtc_datetime.weekday = new_time.weekday;
+    rtc_datetime.hours = new_time.hours;
+    rtc_datetime.minutes = new_time.minutes;
+    rtc_datetime.seconds = new_time.seconds;
+    rtc_datetime_valid = 1;
+    RS485_UpdateLiveRtcRegisters();
+    if (!RTC_SaveDateTimeToEEPROM(&new_time))
+    {
+        Modbus_SendException(function, 0x04);
+        return;
+    }
+
+    tx_buffer[0] = port1_slave_id;
+    tx_buffer[1] = function;
+    tx_buffer[2] = (uint8_t)(start_address >> 8);
+    tx_buffer[3] = (uint8_t)start_address;
+    tx_buffer[4] = 0;
+    tx_buffer[5] = 6;
+    RS485_SendFrame(1, tx_buffer, 6);
+    if (port1_response_count != 0xFFFF)
+    {
+        port1_response_count++;
+    }
+}
+
 static void Modbus_HandleSlaveFrame(uint8_t length)
 {
     uint8_t function;
@@ -2014,7 +2139,6 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
     uint16_t start_address;
     uint16_t value;
     uint16_t register_offset;
-    uint16_t bms_override_for_validation;
     int16_t balance_before_write;
     uint8_t disconnected_before_write;
 
@@ -2129,8 +2253,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             Modbus_SendException(function, 0x02);
             return;
         }
-        if (!RS485_IsWritableRegisterValueValid(start_address, value,
-                slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET]))
+        if (!RS485_IsWritableRegisterValueValid(start_address, value))
         {
             Modbus_SendException(function, 0x03);
             return;
@@ -2158,6 +2281,10 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                 change_flags |= Prepaid_ChangeFlagForOffset(start_address);
             }
             slave_holding_registers[start_address] = value;
+            if (start_address == RTC_SYNC_OFFSET)
+            {
+                RS485_ServiceClockSyncRequest(value);
+            }
             if (start_address == TAMPER_EVENT_OFFSET)
             {
                 tamper_event_count = 0;
@@ -2208,28 +2335,20 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             Modbus_SendException(function, 0x02);
             return;
         }
+        if (start_address == RTC_LIVE_YEAR_OFFSET && quantity == 6)
+        {
+            RS485_HandleRtcWrite(function, start_address);
+            return;
+        }
 
         config_touched = 0;
         change_flags = 0;
-        bms_override_for_validation =
-            slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET];
-        for (index = 0; index < quantity; index++)
-        {
-            register_offset = start_address + index;
-            if (register_offset == BMS_RELAY_OVERRIDE_OFFSET)
-            {
-                bms_override_for_validation =
-                    ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
-                    port1_rx_buffer[8 + (index * 2)];
-            }
-        }
         for (index = 0; index < quantity; index++)
         {
             register_offset = start_address + index;
             value = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
                     port1_rx_buffer[8 + (index * 2)];
-            if (!RS485_IsWritableRegisterValueValid(register_offset, value,
-                    bms_override_for_validation))
+            if (!RS485_IsWritableRegisterValueValid(register_offset, value))
             {
                 Modbus_SendException(function, 0x03);
                 return;
@@ -2299,6 +2418,10 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                     slave_holding_registers[register_offset], value,
                     balance_before_write, disconnected_before_write);
                 slave_holding_registers[register_offset] = value;
+                if (register_offset == RTC_SYNC_OFFSET)
+                {
+                    RS485_ServiceClockSyncRequest(value);
+                }
             }
             if (register_offset == TAMPER_EVENT_OFFSET)
             {

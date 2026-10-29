@@ -26,7 +26,7 @@
 #define LAST_RECHARGE_OFFSET       42
 #define RECHARGE_INPUT_OFFSET      43
 #define TOTAL_DEDUCTED_OFFSET      44
-#define TOTAL_AMOUNT_OFFSET        45
+#define RTC_SYNC_OFFSET             45
 #define MAIN_KWH_RATE_OFFSET        13
 #define MAIN_KVAH_RATE_OFFSET       14
 #define DG_KWH_RATE_OFFSET          15

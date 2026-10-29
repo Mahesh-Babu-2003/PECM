@@ -29,9 +29,8 @@ extern volatile uint8_t back_light_on;
 #define LCD_UI_SCREEN_14_BMS_OVERRIDE      14
 #define LCD_UI_SCREEN_15_BILLING_PARAMETER 15
 #define LCD_UI_SCREEN_16_LAST_RECHARGE     16
-#define LCD_UI_SCREEN_17_TOTAL_AMOUNT      17
-#define LCD_UI_SCREEN_18_TOTAL_DEDUCTED    18
-#define LCD_UI_SCREEN_COUNT                18
+#define LCD_UI_SCREEN_17_TOTAL_DEDUCTED    17
+#define LCD_UI_SCREEN_COUNT                17
 #define LCD_UI_SCREEN_RTC_EDIT             0
 
 void LCD_UI_Init(void);
