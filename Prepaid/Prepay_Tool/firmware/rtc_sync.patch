@@ -1,0 +1,141 @@
+diff -u -r a/README.md b/README.md
+--- a/README.md	2026-10-29 10:53:15.838701128 +0000
++++ b/README.md	2026-10-29 10:53:15.842396593 +0000
+@@ -77,7 +77,7 @@
+   | `40034` | Disconnect mode | Read/write: `1` = Max Load mode, `0` = Max Time mode; selects which limit is active without clearing either value |
+   | `40035` | BMS relay override | Read/write and saved: `0` = automatic balance control; `1` = at zero/negative balance, allow BMS relay commands and preserve current relay states |
+   | `40036` | Consumption after disconnection | Firmware latches `1` when a cumulative consumption total rises while balance is at/below zero and all relays are off; BMS writes `0` to acknowledge/clear |
+-  | `40037` | RTC year | Read-only; set the clock from the PCB buttons |
++  | `40037` | RTC year | Read-only for single writes. To set the clock from a master, write all six registers `40037`-`40042` in one function 16 request (year, month, day, hour, minute, second). The board validates them, writes the PCF8563 and saves the EEPROM snapshot. It replies exception `03` for an invalid date/time, `06` while the LCD RTC editor is open and `04` if the RTC write fails. The PCB buttons still work. |
+   | `40038` | RTC month | Read-only |
+   | `40039` | RTC day | Read-only |
+   | `40040` | RTC hour | Read-only |
+diff -u -r a/src/main.c b/src/main.c
+--- a/src/main.c	2026-10-29 10:53:15.836913005 +0000
++++ b/src/main.c	2026-10-29 10:53:15.840546584 +0000
+@@ -27,7 +27,7 @@
+ static uint8_t low_balance_buzzer_state;
+ static uint8_t low_balance_beep_count;
+ static uint16_t low_balance_buzzer_timer;
+-static uint8_t rtc_edit_active;
++uint8_t rtc_edit_active;  /* also read by rs485_test.c */
+ static uint8_t rtc_edit_digit;
+ static uint8_t rtc_edit_entry_press_count;
+ static uint16_t rtc_edit_entry_timer;
+diff -u -r a/src/rs485_test.c b/src/rs485_test.c
+--- a/src/rs485_test.c	2026-10-29 10:53:15.836840738 +0000
++++ b/src/rs485_test.c	2026-10-29 10:53:15.840478056 +0000
+@@ -2003,6 +2003,101 @@
+     }
+ }
+ 
++/* Set by main.c while the LCD RTC editor is open. */
++extern uint8_t rtc_edit_active;
++
++static uint8_t RS485_DaysInMonth(uint16_t year, uint8_t month)
++{
++    static const uint8_t days[12] =
++        {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
++
++    if (month == 2 && ((year % 4 == 0 && year % 100 != 0) ||
++        year % 400 == 0))
++    {
++        return 29;
++    }
++    return days[month - 1];
++}
++
++static uint8_t RS485_CalculateWeekday(uint16_t year, uint8_t month,
++    uint8_t day)
++{
++    uint16_t century_year;
++    uint16_t century;
++    uint16_t weekday;
++
++    if (month < 3) { month += 12; year--; }
++    century_year = (uint16_t)(year % 100);
++    century = (uint16_t)(year / 100);
++    weekday = (uint16_t)((day + (13 * (month + 1)) / 5 + century_year +
++        (century_year / 4) + (century / 4) + (5 * century)) % 7);
++    return (uint8_t)((weekday + 6) % 7);
++}
++
++/* Function 16 covering exactly 40037-40042 sets the RTC from the master:
++ * year, month, day, hour, minute, second. The six values are validated
++ * together, written to the PCF8563 and saved to the EEPROM snapshot. */
++static void RS485_HandleRtcWrite(uint8_t function, uint16_t start_address)
++{
++    RTC_DateTime new_time;
++    uint16_t field[6];
++    uint8_t index;
++
++    for (index = 0; index < 6; index++)
++    {
++        field[index] = ((uint16_t)port1_rx_buffer[7 + (index * 2)] << 8) |
++            port1_rx_buffer[8 + (index * 2)];
++    }
++    if (rtc_edit_active)
++    {
++        Modbus_SendException(function, 0x06);
++        return;
++    }
++    if (field[0] < 2000 || field[0] > 2199 || field[1] < 1 ||
++        field[1] > 12 || field[2] < 1 ||
++        field[2] > RS485_DaysInMonth(field[0], (uint8_t)field[1]) ||
++        field[3] > 23 || field[4] > 59 || field[5] > 59)
++    {
++        Modbus_SendException(function, 0x03);
++        return;
++    }
++    new_time.year = field[0];
++    new_time.month = (uint8_t)field[1];
++    new_time.day = (uint8_t)field[2];
++    new_time.hours = (uint8_t)field[3];
++    new_time.minutes = (uint8_t)field[4];
++    new_time.seconds = (uint8_t)field[5];
++    new_time.weekday = RS485_CalculateWeekday(new_time.year, new_time.month,
++        new_time.day);
++    if (!RTC_WriteDateTime(&new_time))
++    {
++        Modbus_SendException(function, 0x04);
++        return;
++    }
++    rtc_datetime.year = new_time.year;
++    rtc_datetime.month = new_time.month;
++    rtc_datetime.day = new_time.day;
++    rtc_datetime.weekday = new_time.weekday;
++    rtc_datetime.hours = new_time.hours;
++    rtc_datetime.minutes = new_time.minutes;
++    rtc_datetime.seconds = new_time.seconds;
++    rtc_datetime_valid = 1;
++    RS485_UpdateLiveRtcRegisters();
++    (void)RTC_SaveDateTimeToEEPROM(&new_time);
++
++    tx_buffer[0] = port1_slave_id;
++    tx_buffer[1] = function;
++    tx_buffer[2] = (uint8_t)(start_address >> 8);
++    tx_buffer[3] = (uint8_t)start_address;
++    tx_buffer[4] = 0;
++    tx_buffer[5] = 6;
++    RS485_SendFrame(1, tx_buffer, 6);
++    if (port1_response_count != 0xFFFF)
++    {
++        port1_response_count++;
++    }
++}
++
+ static void Modbus_HandleSlaveFrame(uint8_t length)
+ {
+     uint8_t function;
+@@ -2208,6 +2303,11 @@
+             Modbus_SendException(function, 0x02);
+             return;
+         }
++        if (start_address == RTC_LIVE_YEAR_OFFSET && quantity == 6)
++        {
++            RS485_HandleRtcWrite(function, start_address);
++            return;
++        }
+ 
+         config_touched = 0;
+         change_flags = 0;

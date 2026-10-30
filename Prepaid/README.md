@@ -13,8 +13,8 @@ and selected prepaid load and balance values.
 - Default energy meter settings on port 2: slave ID `4`, `9600 baud`, `8E1`.
 - Default controller slave settings on port 1: ID `1`, `9600 baud`, `8E1`.
 - The meter poll starts at protocol offset `0` and requests 50 registers.
-- The controller map supports holding registers `40001` through `40050`
-  (zero-based protocol offsets `0` through `49`). Write `1` to `40001` to
+- The controller map supports holding registers `40001` through `40100`
+  (zero-based protocol offsets `0` through `99`). Write `1` to `40001` to
   disconnect all three relays, or `0` to connect all three when balance control
   permits. `40001` is the only relay command register; physical relay states
   are not exposed as individual holding registers. Function `16` can write the
@@ -83,11 +83,15 @@ and selected prepaid load and balance values.
   | `40040` | RTC hour | Read-only |
   | `40041` | RTC minute | Read-only |
   | `40042` | RTC second | Read-only |
-  | `40043` | Last recharge amount | Read-only signed 16-bit value from the most recent recharge input |
+  | `40043` | Last recharge amount | Read-only signed 16-bit value from the most recent recharge input; its date/time is shown on LCD screen 16 |
   | `40044` | Recharge input | Write a signed 16-bit adjustment: positive adds credit, negative subtracts credit; `0` adds no credit and does not reset billing |
   | `40045` | Total amount deducted | Read-only selected-mode cost since the latest nonzero recharge, clamped to 65535; resets to `0` on nonzero recharge |
   | `40046` | Clock synchronization | Write `1` to refresh the board RTC values in `40037`–`40042`; read `1` for success or `2` if the board RTC could not be read; write `0` to clear the status |
-  | `40047`–`40050` | Reserved | Read as zero; writes are rejected |
+  | `40047` | Tamper timestamp valid | Read-only: `1` when `40048`–`40053` contain a saved timestamp; otherwise `0` |
+  | `40048`–`40053` | Tamper timestamp | Read-only: year, month, day, hour, minute, second of the latest tamper event |
+  | `40054` | Last-recharge timestamp valid | Read-only: `1` when `40055`–`40060` contain a saved timestamp; otherwise `0` |
+  | `40055`–`40060` | Last-recharge timestamp | Read-only: year, month, day, hour, minute, second of the latest nonzero recharge |
+  | `40061`–`40100` | Reserved | Read as zero; writes are rejected |
 
   Register `40013` is the remaining balance. Recharge writes to `40044` add
   credit, and consumption cost is deducted according to the selected billing
@@ -134,7 +138,10 @@ and selected prepaid load and balance values.
   while SW4 is secure to clear it. At startup, a secure input sets the
   count to `0`; a tampered input initializes it to `1`. The Modbus master
   should poll `40029` to detect events. The count is held in RAM and is not
-  saved across a firmware restart.
+  saved across a firmware restart. When the RTC time is valid, the latest
+  tamper event's date and time are stored in EEPROM, shown on LCD screen 13,
+  and exposed through `40047`–`40053`. A saved-time validity flag prevents an
+  invalid RTC value from being reported as an event time.
 - The schematic uses latching relay SET/RESET coils. Firmware pulses the
   selected coil for 120 ms. Software relay states start at zero and update when
   commanded. The board has no relay contact feedback, so readback is not a
@@ -154,7 +161,10 @@ and selected prepaid load and balance values.
   low-balance alert (shown only when `40021 = 1`), screen 11 low-balance
   threshold, screen 12 Max Load/Max Time, screen 13 tamper event, screen 14 BMS
   relay override, screen 15 billing parameter, screen 16 last recharge, and
-  screen 17 total amount deducted (`40045`).
+  screen 17 total amount deducted (`40045`). Screens 13 and 16 show their
+  saved timestamp as `DD/MM/YY HH:MM` when available. The latest nonzero
+  recharge stores its date and time in EEPROM with its own validity flag at
+  `40054`–`40060`.
    The billing screen displays `0: kWh`, `1: kVAh`, `2: PF`, `3: kW`,
   `4: kVA`, or `5: kVArh`. The RTC editor is screen ID 0. Each customer screen
   stays visible for three seconds; a short SW1 press advances immediately. The
@@ -170,7 +180,8 @@ and selected prepaid load and balance values.
   return to the customer-screen loop. Modbus registers `40037`–`40042` update
   to the saved date and time. Time uses a 24-hour clock. The registers expose
   read-only live year, month, day, hour, minute, and second. Recharge and
-  synchronization registers are `40043`–`40046`; `40047`–`40050` are reserved.
+  synchronization and saved-timestamp registers are `40043`–`40060`;
+  `40061`–`40100` are reserved.
   To synchronize the BMS clock to the board clock, the BMS writes `1` to
   `40046`, waits for status `1`, then reads the board date and time from
   `40037`–`40042` and sets
@@ -212,7 +223,7 @@ with correct polarity to keep the clock running when the main supply is off.
 3. Join signal grounds when available. Do not connect the meter supply to A/B.
 4. Configure the meter for ID `4`, `9600 8E1`; configure the PC master for
   controller ID `1`, `9600 8E1`, and function `03` (Read Holding Registers).
-  Read `40001` through `40050` for controller data and `40201` through `40250`
+  Read `40001` through `40100` for controller data and `40201` through `40250`
   for meter readings. Use function `06` to write `1` to `40001` to disconnect
   all three relays or `0` to connect all three when balance control permits.
   Read tamper event count at `40029`. Use
@@ -236,7 +247,7 @@ and slave state:
 - `energy_meter_registers[0]` through `[49]`: latest raw meter values.
 - `s_energy_meter_registers[0]` through `[49]`: retained last-good meter
   values served at holding registers `40201` through `40250`.
-- `slave_holding_registers[0]` through `[49]`: holding registers 40001–40050;
+- `slave_holding_registers[0]` through `[99]`: holding registers 40001–40100;
   index 0 is the all-relay command/status, indices 1–6 are the two serial-port
   settings groups, and later indices follow the map above.
 - `slave_relay_states[0]` through `[2]`: commanded states of the three

@@ -28,6 +28,26 @@ static uint8_t LCD_UI_WriteSignedInteger(int16_t value)
     return LCD_UI_WriteUnsignedLong((uint32_t)value);
 }
 
+static void LCD_UI_WriteTwoDigits(uint8_t value)
+{
+    LCD_WriteChar((char)('0' + (value / 10)));
+    LCD_WriteChar((char)('0' + (value % 10)));
+}
+
+static uint8_t LCD_UI_WriteTimestamp(const RTC_DateTime *timestamp)
+{
+    LCD_UI_WriteTwoDigits(timestamp->day);
+    LCD_WriteChar('/');
+    LCD_UI_WriteTwoDigits(timestamp->month);
+    LCD_WriteChar('/');
+    LCD_UI_WriteTwoDigits((uint8_t)(timestamp->year % 100));
+    LCD_WriteChar(' ');
+    LCD_UI_WriteTwoDigits(timestamp->hours);
+    LCD_WriteChar(':');
+    LCD_UI_WriteTwoDigits(timestamp->minutes);
+    return 14;
+}
+
 static void LCD_UI_PadLine(uint8_t row, uint8_t used)
 {
     if (used >= 16) return;
@@ -178,10 +198,22 @@ static void LCD_UI_ShowDisconnectLimit(void)
 
 static void LCD_UI_ShowTamperEvent(void)
 {
+    RTC_DateTime timestamp;
     uint8_t used;
-    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Tamper Event");
-    LCD_UI_PadLine(0, 12); LCD_SetCursor(1, 0); LCD_WriteText("Value: ");
-    used = (uint8_t)(7 + LCD_UI_WriteUnsignedLong(slave_holding_registers[TAMPER_EVENT_OFFSET]));
+    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Tamper Event:");
+    used = (uint8_t)(13 + LCD_UI_WriteUnsignedLong(
+        slave_holding_registers[TAMPER_EVENT_OFFSET]));
+    LCD_UI_PadLine(0, used);
+    LCD_SetCursor(1, 0);
+    if (RS485_GetTamperTimestamp(&timestamp))
+    {
+        used = LCD_UI_WriteTimestamp(&timestamp);
+    }
+    else
+    {
+        LCD_WriteText("Time: unavailable");
+        used = 16;
+    }
     LCD_UI_PadLine(1, used);
 }
 
@@ -208,12 +240,23 @@ static void LCD_UI_ShowConsumptionFlag(void)
 
 static void LCD_UI_ShowLastRecharge(void)
 {
+    RTC_DateTime timestamp;
     uint8_t used;
     int16_t amount;
     amount = (int16_t)slave_holding_registers[LAST_RECHARGE_OFFSET];
-    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Last Recharge");
-    LCD_UI_PadLine(0, 13); LCD_SetCursor(1, 0); LCD_WriteText("Amount: ");
-    used = (uint8_t)(8 + LCD_UI_WriteSignedInteger(amount));
+    LCD_Command(0x0C); LCD_SetCursor(0, 0); LCD_WriteText("Recharge:");
+    used = (uint8_t)(9 + LCD_UI_WriteSignedInteger(amount));
+    LCD_UI_PadLine(0, used);
+    LCD_SetCursor(1, 0);
+    if (RS485_GetLastRechargeTimestamp(&timestamp))
+    {
+        used = LCD_UI_WriteTimestamp(&timestamp);
+    }
+    else
+    {
+        LCD_WriteText("Time: unavailable");
+        used = 16;
+    }
     LCD_UI_PadLine(1, used);
 }
 

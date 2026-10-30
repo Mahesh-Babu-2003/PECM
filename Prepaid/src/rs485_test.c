@@ -20,6 +20,7 @@
 #define MASTER_TIMEOUT_MS       300
 #define MASTER_POLL_INTERVAL_MS 1000
 #define RX_BUFFER_SIZE          128
+#define TX_BUFFER_SIZE          256
 #define METER_EEPROM_ADDRESS    0x50
 #define METER_EEPROM_OFFSET     0x0100
 #define METER_EEPROM_PAGE_SIZE  32
@@ -31,8 +32,14 @@
 #define COMM_CONFIG_RECORD_VERSION 3
 #define BAUD_REGISTER_115200 0xFFFF
 #define PREPAID_EEPROM_OFFSET 0x0080
-#define PREPAID_RECORD_SIZE 70
+#define PREPAID_RECORD_SIZE 86
 #define PREPAID_SAVE_DELAY_MS 500UL
+
+#define PREPAID_RECORD_VERSION 8
+#define PREPAID_TIMESTAMP_TAMPER_VALID   0x01
+#define PREPAID_TIMESTAMP_RECHARGE_VALID 0x02
+#define PREPAID_TAMPER_TIMESTAMP_OFFSET   68
+#define PREPAID_RECHARGE_TIMESTAMP_OFFSET 75
 
 #define PREPAID_CHANGE_COMPANY     0x01
 #define PREPAID_CHANGE_LOADS       0x02
@@ -77,7 +84,7 @@ static void Prepaid_ResetConsumptionTotals(void)
 
 static uint8_t xdata port1_rx_buffer[RX_BUFFER_SIZE];
 static uint8_t xdata port2_rx_buffer[RX_BUFFER_SIZE];
-static uint8_t xdata tx_buffer[RX_BUFFER_SIZE];
+static uint8_t xdata tx_buffer[TX_BUFFER_SIZE];
 static uint32_t port1_baud_rate;
 static uint32_t port2_baud_rate;
 static volatile uint8_t port1_parity;
@@ -87,10 +94,13 @@ static uint8_t meter_slave_id;
 static uint8_t comm_config_pending;
 static uint8_t tamper_previous_status;
 static uint8_t tamper_event_count;
+static uint8_t prepaid_timestamp_flags;
+static RTC_DateTime tamper_timestamp;
+static RTC_DateTime last_recharge_timestamp;
 volatile uint16_t xdata energy_meter_registers[METER_REGISTER_COUNT];
 /* Last successfully received meter values; retained across poll timeouts/errors. */
 volatile uint16_t xdata s_energy_meter_registers[METER_REGISTER_COUNT];
-/* Controller holding registers 40001..40050; meter data is served at 40201..40250. */
+/* Controller holding registers 40001..40100; meter data is served at 40201..40250. */
 volatile uint16_t xdata slave_holding_registers[SLAVE_REGISTER_COUNT];
 volatile uint8_t slave_relay_states[SLAVE_RELAY_COUNT];
 static uint8_t relay_state_known[SLAVE_RELAY_COUNT];
@@ -151,6 +161,92 @@ static uint32_t meter_eeprom_save_timer_ms;
 static uint8_t Prepaid_CompanyRegisterIsValid(uint16_t value);
 static void PrepaidEeprom_RequestSave(void);
 static uint8_t CommConfig_Save(void);
+
+static uint8_t Prepaid_DateTimeIsValid(const RTC_DateTime *datetime)
+{
+    if (datetime == 0 || datetime->year < 2000 || datetime->year > 2199 ||
+        datetime->month == 0 || datetime->month > 12 ||
+        datetime->day == 0 || datetime->day > 31 ||
+        datetime->hours > 23 || datetime->minutes > 59 ||
+        datetime->seconds > 59)
+    {
+        return 0;
+    }
+    return 1;
+}
+
+static void Prepaid_CaptureTimestamp(RTC_DateTime *timestamp,
+                                     uint8_t valid_flag)
+{
+    if (!rtc_datetime_valid || !Prepaid_DateTimeIsValid(
+        (const RTC_DateTime *)&rtc_datetime))
+    {
+        return;
+    }
+    timestamp->year = rtc_datetime.year;
+    timestamp->month = rtc_datetime.month;
+    timestamp->day = rtc_datetime.day;
+    timestamp->weekday = rtc_datetime.weekday;
+    timestamp->hours = rtc_datetime.hours;
+    timestamp->minutes = rtc_datetime.minutes;
+    timestamp->seconds = rtc_datetime.seconds;
+    prepaid_timestamp_flags |= valid_flag;
+}
+
+static void Prepaid_WriteTimestamp(uint8_t offset, const RTC_DateTime *timestamp)
+{
+    prepaid_eeprom_record[offset] = (uint8_t)(timestamp->year >> 8);
+    prepaid_eeprom_record[offset + 1] = (uint8_t)timestamp->year;
+    prepaid_eeprom_record[offset + 2] = timestamp->month;
+    prepaid_eeprom_record[offset + 3] = timestamp->day;
+    prepaid_eeprom_record[offset + 4] = timestamp->hours;
+    prepaid_eeprom_record[offset + 5] = timestamp->minutes;
+    prepaid_eeprom_record[offset + 6] = timestamp->seconds;
+}
+
+static void Prepaid_ReadTimestamp(uint8_t offset, RTC_DateTime *timestamp)
+{
+    timestamp->year = (uint16_t)(((uint16_t)prepaid_eeprom_record[offset] << 8) |
+        prepaid_eeprom_record[offset + 1]);
+    timestamp->month = prepaid_eeprom_record[offset + 2];
+    timestamp->day = prepaid_eeprom_record[offset + 3];
+    timestamp->hours = prepaid_eeprom_record[offset + 4];
+    timestamp->minutes = prepaid_eeprom_record[offset + 5];
+    timestamp->seconds = prepaid_eeprom_record[offset + 6];
+    timestamp->weekday = 0;
+}
+
+static void RS485_UpdateSavedTimestampRegisters(void)
+{
+    slave_holding_registers[TAMPER_TIMESTAMP_VALID_OFFSET] =
+        (prepaid_timestamp_flags & PREPAID_TIMESTAMP_TAMPER_VALID) ? 1 : 0;
+    slave_holding_registers[TAMPER_TIMESTAMP_YEAR_OFFSET] =
+        tamper_timestamp.year;
+    slave_holding_registers[TAMPER_TIMESTAMP_MONTH_OFFSET] =
+        tamper_timestamp.month;
+    slave_holding_registers[TAMPER_TIMESTAMP_DAY_OFFSET] =
+        tamper_timestamp.day;
+    slave_holding_registers[TAMPER_TIMESTAMP_HOUR_OFFSET] =
+        tamper_timestamp.hours;
+    slave_holding_registers[TAMPER_TIMESTAMP_MINUTE_OFFSET] =
+        tamper_timestamp.minutes;
+    slave_holding_registers[TAMPER_TIMESTAMP_SECOND_OFFSET] =
+        tamper_timestamp.seconds;
+    slave_holding_registers[RECHARGE_TIMESTAMP_VALID_OFFSET] =
+        (prepaid_timestamp_flags & PREPAID_TIMESTAMP_RECHARGE_VALID) ? 1 : 0;
+    slave_holding_registers[RECHARGE_TIMESTAMP_YEAR_OFFSET] =
+        last_recharge_timestamp.year;
+    slave_holding_registers[RECHARGE_TIMESTAMP_MONTH_OFFSET] =
+        last_recharge_timestamp.month;
+    slave_holding_registers[RECHARGE_TIMESTAMP_DAY_OFFSET] =
+        last_recharge_timestamp.day;
+    slave_holding_registers[RECHARGE_TIMESTAMP_HOUR_OFFSET] =
+        last_recharge_timestamp.hours;
+    slave_holding_registers[RECHARGE_TIMESTAMP_MINUTE_OFFSET] =
+        last_recharge_timestamp.minutes;
+    slave_holding_registers[RECHARGE_TIMESTAMP_SECOND_OFFSET] =
+        last_recharge_timestamp.seconds;
+}
 
 static uint8_t RS485_EvenParity(uint8_t value)
 {
@@ -456,6 +552,7 @@ static void Prepaid_ObserveConsumptionAfterDisconnect(
 
 void RS485_UpdateLiveRtcRegisters(void)
 {
+    RS485_UpdateSavedTimestampRegisters();
     if (!rtc_datetime_valid)
     {
         slave_holding_registers[RTC_LIVE_YEAR_OFFSET] = 0;
@@ -473,6 +570,42 @@ void RS485_UpdateLiveRtcRegisters(void)
     slave_holding_registers[RTC_LIVE_HOUR_OFFSET] = rtc_datetime.hours;
     slave_holding_registers[RTC_LIVE_MINUTE_OFFSET] = rtc_datetime.minutes;
     slave_holding_registers[RTC_LIVE_SECOND_OFFSET] = rtc_datetime.seconds;
+
+    /* At power-up a tamper input may already be active before the RTC is
+     * first read.  Record that event as soon as a valid clock is available. */
+    if (tamper_event_count != 0 &&
+        !(prepaid_timestamp_flags & PREPAID_TIMESTAMP_TAMPER_VALID))
+    {
+        Prepaid_CaptureTimestamp(&tamper_timestamp,
+            PREPAID_TIMESTAMP_TAMPER_VALID);
+        if (prepaid_timestamp_flags & PREPAID_TIMESTAMP_TAMPER_VALID)
+        {
+            PrepaidEeprom_RequestSave();
+            RS485_UpdateSavedTimestampRegisters();
+        }
+    }
+}
+
+uint8_t RS485_GetTamperTimestamp(RTC_DateTime *datetime)
+{
+    if (!(prepaid_timestamp_flags & PREPAID_TIMESTAMP_TAMPER_VALID) ||
+        !Prepaid_DateTimeIsValid(&tamper_timestamp))
+    {
+        return 0;
+    }
+    *datetime = tamper_timestamp;
+    return 1;
+}
+
+uint8_t RS485_GetLastRechargeTimestamp(RTC_DateTime *datetime)
+{
+    if (!(prepaid_timestamp_flags & PREPAID_TIMESTAMP_RECHARGE_VALID) ||
+        !Prepaid_DateTimeIsValid(&last_recharge_timestamp))
+    {
+        return 0;
+    }
+    *datetime = last_recharge_timestamp;
+    return 1;
 }
 
 static void RS485_ServiceClockSyncRequest(uint16_t request)
@@ -1271,6 +1404,22 @@ static void Prepaid_SetDefaults(void)
     prepaid_total_recharge_amount = 0;
     prepaid_deduction_baseline = 0;
     prepaid_current_balance = 0;
+    prepaid_timestamp_flags = 0;
+    tamper_timestamp.year = 0;
+    tamper_timestamp.month = 0;
+    tamper_timestamp.day = 0;
+    tamper_timestamp.weekday = 0;
+    tamper_timestamp.hours = 0;
+    tamper_timestamp.minutes = 0;
+    tamper_timestamp.seconds = 0;
+    last_recharge_timestamp.year = 0;
+    last_recharge_timestamp.month = 0;
+    last_recharge_timestamp.day = 0;
+    last_recharge_timestamp.weekday = 0;
+    last_recharge_timestamp.hours = 0;
+    last_recharge_timestamp.minutes = 0;
+    last_recharge_timestamp.seconds = 0;
+    RS485_UpdateSavedTimestampRegisters();
     slave_holding_registers[MAIN_KWH_RATE_OFFSET] = 0;
     slave_holding_registers[LAST_RECHARGE_OFFSET] = 0;
     slave_holding_registers[RECHARGE_INPUT_OFFSET] = 0;
@@ -1336,6 +1485,15 @@ static void PrepaidEeprom_Load(void)
     }
     else if (version == 7)
     {
+        crc = Modbus_Crc16(prepaid_eeprom_record, 68);
+        if (prepaid_eeprom_record[68] != (uint8_t)crc ||
+            prepaid_eeprom_record[69] != (uint8_t)(crc >> 8))
+        {
+            return;
+        }
+    }
+    else if (version == PREPAID_RECORD_VERSION)
+    {
         crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
         if (prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] != (uint8_t)crc ||
             prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] != (uint8_t)(crc >> 8))
@@ -1345,9 +1503,14 @@ static void PrepaidEeprom_Load(void)
     }
     if (prepaid_eeprom_record[0] != 0x50 || prepaid_eeprom_record[1] != 0x50 ||
         (version != 1 && version != 2 && version != 3 && version != 4 &&
-            version != 5 && version != 6 && version != 7) ||
+            version != 5 && version != 6 && version != 7 &&
+            version != PREPAID_RECORD_VERSION) ||
         (version == 1 && (prepaid_eeprom_record[3] & 0xFE) != 0) ||
-        (version >= 2 && prepaid_eeprom_record[3] != 0))
+        (version >= 2 && version != PREPAID_RECORD_VERSION &&
+            prepaid_eeprom_record[3] != 0) ||
+        (version == PREPAID_RECORD_VERSION &&
+            (prepaid_eeprom_record[3] & ~(PREPAID_TIMESTAMP_TAMPER_VALID |
+                PREPAID_TIMESTAMP_RECHARGE_VALID)) != 0))
     {
         return;
     }
@@ -1511,7 +1674,30 @@ static void PrepaidEeprom_Load(void)
     {
         prepaid_deduction_baseline = 0;
     }
-    if (version != 7) PrepaidEeprom_RequestSave();
+    if (version == PREPAID_RECORD_VERSION)
+    {
+        prepaid_timestamp_flags = prepaid_eeprom_record[3];
+        if (prepaid_timestamp_flags & PREPAID_TIMESTAMP_TAMPER_VALID)
+        {
+            Prepaid_ReadTimestamp(PREPAID_TAMPER_TIMESTAMP_OFFSET,
+                &tamper_timestamp);
+            if (!Prepaid_DateTimeIsValid(&tamper_timestamp))
+            {
+                prepaid_timestamp_flags &= ~PREPAID_TIMESTAMP_TAMPER_VALID;
+            }
+        }
+        if (prepaid_timestamp_flags & PREPAID_TIMESTAMP_RECHARGE_VALID)
+        {
+            Prepaid_ReadTimestamp(PREPAID_RECHARGE_TIMESTAMP_OFFSET,
+                &last_recharge_timestamp);
+            if (!Prepaid_DateTimeIsValid(&last_recharge_timestamp))
+            {
+                prepaid_timestamp_flags &= ~PREPAID_TIMESTAMP_RECHARGE_VALID;
+            }
+        }
+    }
+    RS485_UpdateSavedTimestampRegisters();
+    if (version != PREPAID_RECORD_VERSION) PrepaidEeprom_RequestSave();
     Prepaid_RecomputeBalance();
 }
 
@@ -1523,8 +1709,8 @@ static void PrepaidEeprom_BuildRecord(void)
 
     prepaid_eeprom_record[0] = 0x50;
     prepaid_eeprom_record[1] = 0x50;
-    prepaid_eeprom_record[2] = 7;
-    prepaid_eeprom_record[3] = 0;
+    prepaid_eeprom_record[2] = PREPAID_RECORD_VERSION;
+    prepaid_eeprom_record[3] = prepaid_timestamp_flags;
     for (index = 0; index < COMPANY_NAME_REGISTER_COUNT; index++)
     {
         value = slave_holding_registers[COMPANY_NAME_FIRST_OFFSET + index];
@@ -1583,6 +1769,12 @@ static void PrepaidEeprom_BuildRecord(void)
     Prepaid_WriteRecordU16(62,
         slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET]);
     Prepaid_WriteRecordU32(64, (uint32_t)prepaid_deduction_baseline);
+    Prepaid_WriteTimestamp(PREPAID_TAMPER_TIMESTAMP_OFFSET,
+        &tamper_timestamp);
+    Prepaid_WriteTimestamp(PREPAID_RECHARGE_TIMESTAMP_OFFSET,
+        &last_recharge_timestamp);
+    prepaid_eeprom_record[82] = 0;
+    prepaid_eeprom_record[83] = 0;
     crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] = (uint8_t)crc;
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
@@ -1638,6 +1830,9 @@ static void Prepaid_CommitChanges(uint8_t change_flags)
             (uint16_t)recharge_adjustment;
         if (recharge_adjustment != 0)
         {
+            Prepaid_CaptureTimestamp(&last_recharge_timestamp,
+                PREPAID_TIMESTAMP_RECHARGE_VALID);
+            RS485_UpdateSavedTimestampRegisters();
             prepaid_total_recharge_amount = prepaid_current_balance +
                 (int32_t)recharge_adjustment;
             prepaid_deduction_baseline = 0;
@@ -2186,7 +2381,7 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             return;
         }
 
-        /* Controller registers use offsets 0..49; meter data uses 200..249. */
+        /* Controller registers use offsets 0..99; meter data uses 200..249. */
         if (start_address < SLAVE_REGISTER_COUNT)
         {
             if ((uint16_t)(start_address + quantity) > SLAVE_REGISTER_COUNT)
@@ -2667,6 +2862,10 @@ void RS485_Poll(void)
             }
             slave_holding_registers[TAMPER_EVENT_OFFSET] =
                 tamper_event_count;
+            Prepaid_CaptureTimestamp(&tamper_timestamp,
+                PREPAID_TIMESTAMP_TAMPER_VALID);
+            RS485_UpdateSavedTimestampRegisters();
+            PrepaidEeprom_RequestSave();
             prepaid_ui_events |= PREPAID_UI_EVENT_TAMPER |
                 PREPAID_UI_EVENT_ACTIVITY;
         }

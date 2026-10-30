@@ -2,9 +2,10 @@
 #define RS485_TEST_H
 
 #include "ms51_device.h"
+#include "i2c_probe.h"
 
 #define ENERGY_METER_REGISTER_COUNT 50
-#define SLAVE_HOLDING_REGISTER_COUNT 50
+#define SLAVE_HOLDING_REGISTER_COUNT 100
 #define SLAVE_RELAY_COUNT 3
 #define SLAVE_RELAY_COMMAND_OFFSET 0
 
@@ -59,7 +60,23 @@
 #define RTC_LIVE_HOUR_OFFSET        39
 #define RTC_LIVE_MINUTE_OFFSET      40
 #define RTC_LIVE_SECOND_OFFSET      41
-#define RTC_RESERVED_FIRST_OFFSET   42
+/* Saved timestamp registers: flags are 1 when the corresponding fields hold
+ * a valid RTC snapshot.  All timestamp registers are read-only. */
+#define TAMPER_TIMESTAMP_VALID_OFFSET   46
+#define TAMPER_TIMESTAMP_YEAR_OFFSET    47
+#define TAMPER_TIMESTAMP_MONTH_OFFSET   48
+#define TAMPER_TIMESTAMP_DAY_OFFSET     49
+#define TAMPER_TIMESTAMP_HOUR_OFFSET    50
+#define TAMPER_TIMESTAMP_MINUTE_OFFSET  51
+#define TAMPER_TIMESTAMP_SECOND_OFFSET  52
+#define RECHARGE_TIMESTAMP_VALID_OFFSET 53
+#define RECHARGE_TIMESTAMP_YEAR_OFFSET  54
+#define RECHARGE_TIMESTAMP_MONTH_OFFSET 55
+#define RECHARGE_TIMESTAMP_DAY_OFFSET   56
+#define RECHARGE_TIMESTAMP_HOUR_OFFSET  57
+#define RECHARGE_TIMESTAMP_MINUTE_OFFSET 58
+#define RECHARGE_TIMESTAMP_SECOND_OFFSET 59
+#define RESERVED_FIRST_OFFSET           60
 
 #define BILLING_MODE_KWH            0
 #define BILLING_MODE_KVAH           1
@@ -116,6 +133,9 @@ extern volatile uint8_t prepaid_ui_events;
 void RS485_TestInit(void);
 void RS485_Poll(void);
 void RS485_UpdateLiveRtcRegisters(void);
+/* Returns 1 when a saved event time is available. */
+uint8_t RS485_GetTamperTimestamp(RTC_DateTime *datetime);
+uint8_t RS485_GetLastRechargeTimestamp(RTC_DateTime *datetime);
 uint16_t RS485_GetBillingParameterValue(uint16_t offset);
 uint8_t RS485_SetBillingParameter(uint16_t offset, uint16_t value);
 void RS485_GetCommunicationSettings(uint8_t port, uint32_t *baud_rate,
