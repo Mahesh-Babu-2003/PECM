@@ -251,6 +251,7 @@ void main(void)
     {
         RTC_RestoreEepromSnapshot();
     }
+    RS485_UpdateLoadControlClock();
     RS485_UpdateLiveRtcRegisters();
     LCD_UI_Init();
     backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
@@ -284,7 +285,10 @@ void main(void)
             rtc_poll_timer = 0;
             if (!rtc_edit_active)
             {
-                RTC_ReadDateTime(&rtc_datetime);
+                if (RTC_ReadDateTime(&rtc_datetime))
+                {
+                    RS485_UpdateLoadControlClock();
+                }
                 RS485_UpdateLiveRtcRegisters();
             }
         }
@@ -325,6 +329,7 @@ void main(void)
                     rtc_edit_entry_timer = 0;
                     if (RTC_ReadDateTime(&rtc_datetime))
                     {
+                        RS485_UpdateLoadControlClock();
                         rtc_edit_active = 1;
                         rtc_edit_digit = 0;
                         customer_display_timer = 0;

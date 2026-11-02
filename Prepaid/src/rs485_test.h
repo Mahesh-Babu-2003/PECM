@@ -51,8 +51,9 @@
 #define RELAY_DISCONNECT_STATUS_OFFSET 30
 #define LOAD_LIMIT_OFFSET           31
 #define TIME_LIMIT_OFFSET           32
-#define DISCONNECT_MODE_OFFSET      33
-#define BMS_RELAY_OVERRIDE_OFFSET   34
+#define RECONNECT_DELAY_OFFSET      33
+/* 40035: 0 = kWh totals, 1 = kVAh totals, 3 = meter register 40201. */
+#define LOAD_PARAMETER_OFFSET       34
 #define CONSUMPTION_AFTER_DISCONNECT_OFFSET 35
 #define RTC_LIVE_YEAR_OFFSET        36
 #define RTC_LIVE_MONTH_OFFSET       37
@@ -76,7 +77,10 @@
 #define RECHARGE_TIMESTAMP_HOUR_OFFSET  57
 #define RECHARGE_TIMESTAMP_MINUTE_OFFSET 58
 #define RECHARGE_TIMESTAMP_SECOND_OFFSET 59
-#define RESERVED_FIRST_OFFSET           60
+#define BMS_RELAY_OVERRIDE_OFFSET       60
+#define PORT2_COMMUNICATION_LOST_OFFSET 61
+#define BALANCE_RESET_OFFSET            62
+#define RESERVED_FIRST_OFFSET           63
 
 #define BILLING_MODE_KWH            0
 #define BILLING_MODE_KVAH           1
@@ -132,6 +136,7 @@ extern volatile uint8_t prepaid_ui_events;
 
 void RS485_TestInit(void);
 void RS485_Poll(void);
+void RS485_UpdateLoadControlClock(void);
 void RS485_UpdateLiveRtcRegisters(void);
 /* Returns 1 when a saved event time is available. */
 uint8_t RS485_GetTamperTimestamp(RTC_DateTime *datetime);

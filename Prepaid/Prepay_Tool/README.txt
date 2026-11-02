@@ -12,6 +12,11 @@ WHAT IS IN THIS ZIP
       rtc_sync.patch         the same change as a patch
       src\rs485_test.c, src\main.c   the two edited source files
 
+The dashboard keeps the latest five tamper events in a dropdown. Its history
+is saved on this PC at %LOCALAPPDATA%\PrepayTool\tamper_events.json. If the
+tool first connects when the device counter is already above zero, it shows
+that many prior event numbers; their earlier timestamps are marked unavailable.
+
 
 WHAT TO INSTALL ON THE OTHER PC
 -------------------------------

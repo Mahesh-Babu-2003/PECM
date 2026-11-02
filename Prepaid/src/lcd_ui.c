@@ -186,11 +186,9 @@ static void LCD_UI_ShowDisconnectLimit(void)
 {
     uint16_t value;
     uint8_t used;
-    if (slave_holding_registers[DISCONNECT_MODE_OFFSET] == 1)
-    { value = slave_holding_registers[LOAD_LIMIT_OFFSET]; }
-    else { value = slave_holding_registers[TIME_LIMIT_OFFSET]; }
+    value = slave_holding_registers[LOAD_LIMIT_OFFSET];
     LCD_Command(0x0C); LCD_SetCursor(0, 0);
-    LCD_WriteText(slave_holding_registers[DISCONNECT_MODE_OFFSET] == 1 ? "Max Load" : "Max Time");
+    LCD_WriteText("Max Load Limit");
     LCD_UI_PadLine(0, 8); LCD_SetCursor(1, 0); LCD_WriteText("Value: ");
     used = (uint8_t)(7 + LCD_UI_WriteUnsignedLong(value));
     LCD_UI_PadLine(1, used);

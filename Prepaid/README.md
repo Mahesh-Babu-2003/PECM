@@ -52,7 +52,7 @@ and selected prepaid load and balance values.
   | --- | --- | --- |
   | `40001` | All-load command/status | Read/write: `1` = disconnect all three relays; `0` = connect all three, subject to balance control. The read value is `1` only when all relays are disconnected. |
   | `40002`–`40007` | Port 1 and Port 2 communication settings | See the six-register table above |
-  | `40008`–`40012` | Company name | Read/write, up to 10 ASCII characters, two per register, high byte first; default `PEMC` |
+  | `40008`–`40012` | Company name | Read/write, up to 10 alphanumeric ASCII characters, two per register, high byte first; default `PEMC` |
   | `40013` | Remaining balance | Read-only signed 16-bit calculated balance |
   | `40014` | Mains kWh rate | Read/write unsigned integer |
   | `40015` | Mains kVAh rate | Read/write unsigned integer |
@@ -71,11 +71,11 @@ and selected prepaid load and balance values.
   | `40028` | Solar consumption kVAh total | Read/write unsigned cumulative total |
   | `40029` | Tamper event count | `0` when clear; increments from `1` to `5`, then wraps to `1`; write `0` to clear when SW4 is secure |
   | `40030` | Billing parameter selection | Read/write: `0` = kWh billing, `1` = kVAh billing, `2` = PF, `3` = kW, `4` = kVA, `5` = kVArh |
-  | `40031` | All-relays-disconnected status | Read-only: `1` when all three commanded relay states are off; `0` otherwise |
-  | `40032` | Load limit | Read/write unsigned integer; retained in either disconnect mode |
-  | `40033` | Time limit | Read/write unsigned integer; retained in either disconnect mode |
-  | `40034` | Disconnect mode | Read/write: `1` = Max Load mode, `0` = Max Time mode; selects which limit is active without clearing either value |
-  | `40035` | BMS relay override | Read/write and saved for compatibility; it cannot bypass the automatic relay cutoff when balance is zero or negative |
+  | `40031` | All-loads-disconnected status | Read-only: `1` when all three commanded loads are off; `0` otherwise |
+  | `40032` | Max-load threshold | Read/write unsigned threshold in the selected `40035` measurement units; `0` disables overload cycling |
+  | `40033` | Max-load delay | Read/write seconds, timed against the RTC, that the selected load value must remain above `40032`; `0` trips immediately |
+  | `40034` | Reconnect delay | Read/write RTC-timed minutes disconnected after a trip before reconnecting and checking the load again; `0` reconnects immediately. The cycle repeats while the selected value remains above the threshold |
+  | `40035` | Load-parameter selection | Read/write: `0` = sum of kWh totals, `1` = sum of kVAh totals, `3` = meter register `40201` value |
   | `40036` | Consumption after disconnection | Firmware latches `1` when a cumulative consumption total rises while balance is at/below zero and all relays are off; BMS writes `0` to acknowledge/clear |
   | `40037` | RTC year | Read-only for single-register writes. Set from Modbus by writing all six registers `40037`–`40042` in one function 16 request: year, month, day, hour, minute, second. The board validates the date, sets the RTC, and saves the EEPROM snapshot. Invalid date/time returns exception `03`; an active LCD RTC editor returns `06`; RTC or EEPROM write failure returns `04`. The PCB-button editor remains supported. |
   | `40038` | RTC month | Read-only |
@@ -91,7 +91,10 @@ and selected prepaid load and balance values.
   | `40048`–`40053` | Tamper timestamp | Read-only: year, month, day, hour, minute, second of the latest tamper event |
   | `40054` | Last-recharge timestamp valid | Read-only: `1` when `40055`–`40060` contain a saved timestamp; otherwise `0` |
   | `40055`–`40060` | Last-recharge timestamp | Read-only: year, month, day, hour, minute, second of the latest nonzero recharge |
-  | `40061`–`40100` | Reserved | Read as zero; writes are rejected |
+  | `40061` | BMS load override | Read/write: `0` = automatic balance control, `1` = connect loads despite zero or negative balance; a positive recharge clears it automatically |
+  | `40062` | Port 2 meter communication lost | Read-only: `0` after a valid meter response; `1` when the meter is not communicating, times out, or returns an invalid response |
+  | `40063` | Reset balance | Write `1` to reset the calculated balance to `0`; it reads back as `0` and retains cumulative consumption totals |
+  | `40064`–`40100` | Reserved | Read as zero; writes are rejected |
 
   Register `40013` is the remaining balance. Recharge writes to `40044` add
   credit, and consumption cost is deducted according to the selected billing
@@ -126,8 +129,10 @@ and selected prepaid load and balance values.
   configured threshold, otherwise `0`. While this alert is active, the buzzer
   sounds for half a second three times, with half-second gaps, and starts the
   next burst every 30 seconds. It stops when the alert clears. Relay control follows the calculated
-  balance sign when `40035 = 0`: a positive balance turns all three relays on,
-  while zero or a negative balance turns them off and blocks relay-on commands.
+  balance sign when `40061 = 0`: a positive balance connects all three loads,
+  while zero or a negative balance disconnects them. Writing `1` to `40061`
+  is the explicit BMS bypass that connects the loads at zero or negative
+  balance; a subsequent positive recharge automatically clears the bypass.
   SW4 is the
   active-low tamper input on P2.4: a pressed switch
   is secure, and a released switch is tampered. A debounced transition to
@@ -148,8 +153,8 @@ and selected prepaid load and balance values.
   measurement of the physical contact. At startup, firmware synchronizes the
   relays with the calculated balance. Register `40031` reflects these commanded
   states; a mixed relay state reports `0` because not all three are off.
-  A zero or negative balance always disconnects all three relays and blocks
-  BMS relay-on commands, regardless of `40035`. Register `40036` latches if a
+  A zero or negative balance disconnects all three loads unless the BMS has
+  explicitly enabled the `40061` bypass. Register `40036` latches if a
   mains, DG, or solar cumulative total
   increases through a write to the cumulative registers `40023`–`40028` while
   all relays are off at zero or negative balance. The flag is saved across
@@ -168,9 +173,9 @@ and selected prepaid load and balance values.
    The billing screen displays `0: kWh`, `1: kVAh`, `2: PF`, `3: kW`,
   `4: kVA`, or `5: kVArh`. The RTC editor is screen ID 0. Each customer screen
   stays visible for three seconds; a short SW1 press advances immediately. The
-  load/time screen uses register `40034` to select `Max Load` (`1`, showing
-  `40032`) or `Max Time` (`0`, showing `40033`). Other screen data comes from
-  customer ID `40008`–`40012`, balance `40013`, all-load status `40001`,
+  load/time screen shows the max-load threshold from `40032`; `40033` and
+  `40034` configure the overload trip and reconnect delays. Other screen data
+  comes from customer ID `40008`–`40012`, balance `40013`, all-load status `40001`,
   consumption registers `40023`–`40028`, threshold `40020`, and total amount
   deducted `40045`.
 - Set the RTC from the PCB buttons: press SW2 three times within two seconds
@@ -181,7 +186,8 @@ and selected prepaid load and balance values.
   to the saved date and time. Time uses a 24-hour clock. The registers expose
   read-only live year, month, day, hour, minute, and second. Recharge and
   synchronization and saved-timestamp registers are `40043`–`40060`;
-  `40061`–`40100` are reserved.
+  `40061` is the BMS relay override, `40062` reports Port 2 communication
+  loss, `40063` resets balance to zero, and `40064`–`40100` are reserved.
   To synchronize the BMS clock to the board clock, the BMS writes `1` to
   `40046`, waits for status `1`, then reads the board date and time from
   `40037`–`40042` and sets

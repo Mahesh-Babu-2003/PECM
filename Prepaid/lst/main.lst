@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 1   
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
@@ -62,7 +62,7 @@ line level    source
   50   1      
   51   1          if (low_balance_buzzer_state == LOW_BALANCE_BUZZER_IDLE)
   52   1          {
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 2   
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 2   
 
   53   2              low_balance_buzzer_state = LOW_BALANCE_BUZZER_ON;
   54   2              low_balance_beep_count = 0;
@@ -126,7 +126,7 @@ line level    source
  112   1          uint8_t count;
  113   1      
  114   1          if (month < 1 || month > 12) return 31;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 3   
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 3   
 
  115   1          count = days[month - 1];
  116   1          if (month == 2 && ((year % 4 == 0 && year % 100 != 0) ||
@@ -190,7 +190,7 @@ line level    source
  174   1          else if (digit < 4)
  175   1          {
  176   2              candidate.month = (uint8_t)RTC_AdjustDigit(candidate.month,
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 4   
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 4   
 
  177   2                  (digit == 2) ? 10 : 1, increase);
  178   2          }
@@ -254,7 +254,7 @@ line level    source
  236   1          RTC_DateTime rtc_save_datetime;
  237   1          uint8_t screen_changed;
  238   1          uint8_t prepaid_events;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 5   
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 5   
 
  239   1          uint8_t backlight_activity;
  240   1          uint16_t backlight_timeout;
@@ -271,256 +271,261 @@ line level    source
  251   1          {
  252   2              RTC_RestoreEepromSnapshot();
  253   2          }
- 254   1          RS485_UpdateLiveRtcRegisters();
- 255   1          LCD_UI_Init();
- 256   1          backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
- 257   1          customer_display_screen = LCD_UI_SCREEN_1_CUSTOMER_ID;
- 258   1          customer_display_timer = 0;
- 259   1          LCD_UI_ShowCompanyName();
- 260   1      
- 261   1          while (1)
- 262   1          {
- 263   2              screen_changed = 0;
- 264   2              backlight_activity = 0;
- 265   2              switch_events = 0;
- 266   2              RS485_Poll();
- 267   2              if (rtc_edit_entry_timer != 0)
- 268   2              {
- 269   3                  rtc_edit_entry_timer--;
- 270   3                  if (rtc_edit_entry_timer == 0)
- 271   3                  {
- 272   4                      rtc_edit_entry_press_count = 0;
- 273   4                  }
- 274   3              }
- 275   2              prepaid_events = prepaid_ui_events;
- 276   2              prepaid_ui_events = 0;
- 277   2              if (prepaid_events & PREPAID_UI_EVENT_ACTIVITY)
- 278   2              {
- 279   3                  backlight_activity = 1;
- 280   3              }
- 281   2              if (prepaid_events & PREPAID_UI_EVENT_TAMPER) Board_Beep(100);
- 282   2              if (rtc_poll_timer >= 999)
- 283   2              {
- 284   3                  rtc_poll_timer = 0;
- 285   3                  if (!rtc_edit_active)
- 286   3                  {
- 287   4                      RTC_ReadDateTime(&rtc_datetime);
- 288   4                      RS485_UpdateLiveRtcRegisters();
- 289   4                  }
- 290   3              }
- 291   2              else
- 292   2              {
- 293   3                  rtc_poll_timer++;
+ 254   1          RS485_UpdateLoadControlClock();
+ 255   1          RS485_UpdateLiveRtcRegisters();
+ 256   1          LCD_UI_Init();
+ 257   1          backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
+ 258   1          customer_display_screen = LCD_UI_SCREEN_1_CUSTOMER_ID;
+ 259   1          customer_display_timer = 0;
+ 260   1          LCD_UI_ShowCompanyName();
+ 261   1      
+ 262   1          while (1)
+ 263   1          {
+ 264   2              screen_changed = 0;
+ 265   2              backlight_activity = 0;
+ 266   2              switch_events = 0;
+ 267   2              RS485_Poll();
+ 268   2              if (rtc_edit_entry_timer != 0)
+ 269   2              {
+ 270   3                  rtc_edit_entry_timer--;
+ 271   3                  if (rtc_edit_entry_timer == 0)
+ 272   3                  {
+ 273   4                      rtc_edit_entry_press_count = 0;
+ 274   4                  }
+ 275   3              }
+ 276   2              prepaid_events = prepaid_ui_events;
+ 277   2              prepaid_ui_events = 0;
+ 278   2              if (prepaid_events & PREPAID_UI_EVENT_ACTIVITY)
+ 279   2              {
+ 280   3                  backlight_activity = 1;
+ 281   3              }
+ 282   2              if (prepaid_events & PREPAID_UI_EVENT_TAMPER) Board_Beep(100);
+ 283   2              if (rtc_poll_timer >= 999)
+ 284   2              {
+ 285   3                  rtc_poll_timer = 0;
+ 286   3                  if (!rtc_edit_active)
+ 287   3                  {
+ 288   4                      if (RTC_ReadDateTime(&rtc_datetime))
+ 289   4                      {
+ 290   5                          RS485_UpdateLoadControlClock();
+ 291   5                      }
+ 292   4                      RS485_UpdateLiveRtcRegisters();
+ 293   4                  }
  294   3              }
- 295   2      
- 296   2              switch_events = Board_ReadSwitchPresses();
- 297   2              if (switch_events != 0)
- 298   2              {
- 299   3                  backlight_activity = 1;
- 300   3              }
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 6   
+ 295   2              else
+ 296   2              {
+ 297   3                  rtc_poll_timer++;
+ 298   3              }
+ 299   2      
+ 300   2              switch_events = Board_ReadSwitchPresses();
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 6   
 
- 301   2              switch_press_events = (uint8_t)(switch_events &
- 302   2                  (BOARD_SWITCH_1 | BOARD_SWITCH_2 | BOARD_SWITCH_3));
- 303   2              if (switch_press_events != 0)
- 304   2              {
- 305   3                  Board_Beep(35);
- 306   3              }
- 307   2      
- 308   2              if (!rtc_edit_active)
- 309   2              {
- 310   3                  if (switch_press_events & BOARD_SWITCH_2)
- 311   3                  {
- 312   4                      if (rtc_edit_entry_press_count == 0)
- 313   4                      {
- 314   5                          rtc_edit_entry_press_count = 1;
- 315   5                      }
- 316   4                      else
+ 301   2              if (switch_events != 0)
+ 302   2              {
+ 303   3                  backlight_activity = 1;
+ 304   3              }
+ 305   2              switch_press_events = (uint8_t)(switch_events &
+ 306   2                  (BOARD_SWITCH_1 | BOARD_SWITCH_2 | BOARD_SWITCH_3));
+ 307   2              if (switch_press_events != 0)
+ 308   2              {
+ 309   3                  Board_Beep(35);
+ 310   3              }
+ 311   2      
+ 312   2              if (!rtc_edit_active)
+ 313   2              {
+ 314   3                  if (switch_press_events & BOARD_SWITCH_2)
+ 315   3                  {
+ 316   4                      if (rtc_edit_entry_press_count == 0)
  317   4                      {
- 318   5                          rtc_edit_entry_press_count++;
+ 318   5                          rtc_edit_entry_press_count = 1;
  319   5                      }
- 320   4                      rtc_edit_entry_timer = RTC_EDIT_ENTRY_TIMEOUT_TICKS;
- 321   4                      if (rtc_edit_entry_press_count >=
- 322   4                          RTC_EDIT_ENTRY_PRESS_COUNT)
- 323   4                      {
- 324   5                          rtc_edit_entry_press_count = 0;
- 325   5                          rtc_edit_entry_timer = 0;
- 326   5                          if (RTC_ReadDateTime(&rtc_datetime))
- 327   5                          {
- 328   6                              rtc_edit_active = 1;
- 329   6                              rtc_edit_digit = 0;
- 330   6                              customer_display_timer = 0;
- 331   6                              customer_value_refresh_timer = 0;
- 332   6                              screen_changed = 1;
- 333   6                          }
- 334   5                          else
- 335   5                          {
- 336   6                              RS485_UpdateLiveRtcRegisters();
- 337   6                              LCD_UI_ShowRtcEdit(0);
+ 320   4                      else
+ 321   4                      {
+ 322   5                          rtc_edit_entry_press_count++;
+ 323   5                      }
+ 324   4                      rtc_edit_entry_timer = RTC_EDIT_ENTRY_TIMEOUT_TICKS;
+ 325   4                      if (rtc_edit_entry_press_count >=
+ 326   4                          RTC_EDIT_ENTRY_PRESS_COUNT)
+ 327   4                      {
+ 328   5                          rtc_edit_entry_press_count = 0;
+ 329   5                          rtc_edit_entry_timer = 0;
+ 330   5                          if (RTC_ReadDateTime(&rtc_datetime))
+ 331   5                          {
+ 332   6                              RS485_UpdateLoadControlClock();
+ 333   6                              rtc_edit_active = 1;
+ 334   6                              rtc_edit_digit = 0;
+ 335   6                              customer_display_timer = 0;
+ 336   6                              customer_value_refresh_timer = 0;
+ 337   6                              screen_changed = 1;
  338   6                          }
- 339   5                      }
- 340   4                  }
- 341   3                  else if (switch_press_events != 0)
- 342   3                  {
- 343   4                      rtc_edit_entry_press_count = 0;
- 344   4                      rtc_edit_entry_timer = 0;
+ 339   5                          else
+ 340   5                          {
+ 341   6                              RS485_UpdateLiveRtcRegisters();
+ 342   6                              LCD_UI_ShowRtcEdit(0);
+ 343   6                          }
+ 344   5                      }
  345   4                  }
- 346   3              }
- 347   2              else if (switch_events & BOARD_SWITCH_3_LONG)
- 348   2              {
- 349   3                  rtc_save_datetime.year = rtc_datetime.year;
- 350   3                  rtc_save_datetime.month = rtc_datetime.month;
- 351   3                  rtc_save_datetime.day = rtc_datetime.day;
- 352   3                  rtc_save_datetime.weekday = rtc_datetime.weekday;
- 353   3                  rtc_save_datetime.hours = rtc_datetime.hours;
- 354   3                  rtc_save_datetime.minutes = rtc_datetime.minutes;
- 355   3                  rtc_save_datetime.seconds = rtc_datetime.seconds;
- 356   3                  if (rtc_datetime_valid &&
- 357   3                      RTC_DateTimeIsValid(&rtc_save_datetime) &&
- 358   3                      RTC_WriteDateTime(&rtc_save_datetime))
- 359   3                  {
- 360   4                      RS485_UpdateLiveRtcRegisters();
- 361   4                      if (RTC_SaveDateTimeToEEPROM(&rtc_save_datetime))
- 362   4                      {
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 7   
+ 346   3                  else if (switch_press_events != 0)
+ 347   3                  {
+ 348   4                      rtc_edit_entry_press_count = 0;
+ 349   4                      rtc_edit_entry_timer = 0;
+ 350   4                  }
+ 351   3              }
+ 352   2              else if (switch_events & BOARD_SWITCH_3_LONG)
+ 353   2              {
+ 354   3                  rtc_save_datetime.year = rtc_datetime.year;
+ 355   3                  rtc_save_datetime.month = rtc_datetime.month;
+ 356   3                  rtc_save_datetime.day = rtc_datetime.day;
+ 357   3                  rtc_save_datetime.weekday = rtc_datetime.weekday;
+ 358   3                  rtc_save_datetime.hours = rtc_datetime.hours;
+ 359   3                  rtc_save_datetime.minutes = rtc_datetime.minutes;
+ 360   3                  rtc_save_datetime.seconds = rtc_datetime.seconds;
+ 361   3                  if (rtc_datetime_valid &&
+ 362   3                      RTC_DateTimeIsValid(&rtc_save_datetime) &&
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 7   
 
- 363   5                          Board_Beep(RTC_EDIT_SAVE_BEEP_MS);
- 364   5                      }
- 365   4                      else
- 366   4                      {
- 367   5                          Board_Beep(RTC_EDIT_SAVE_ERROR_BEEP_MS);
- 368   5                      }
- 369   4                      rtc_edit_active = 0;
- 370   4                      customer_display_timer = 0;
- 371   4                      customer_value_refresh_timer = 0;
- 372   4                      LCD_UI_ShowCustomerScreen(customer_display_screen);
- 373   4                  }
- 374   3                  else
- 375   3                  {
- 376   4                      Board_Beep(RTC_EDIT_SAVE_ERROR_BEEP_MS);
- 377   4                  }
- 378   3                  screen_changed = 1;
- 379   3              }
- 380   2              else if (rtc_edit_active)
- 381   2              {
- 382   3                  if (switch_press_events & BOARD_SWITCH_1)
- 383   3                  {
- 384   4                      rtc_edit_digit = (uint8_t)((rtc_edit_digit + 1) %
- 385   4                          RTC_EDIT_DIGIT_COUNT);
- 386   4                      screen_changed = 1;
- 387   4                  }
- 388   3                  else if (switch_press_events & BOARD_SWITCH_2)
- 389   3                  {
- 390   4                      RTC_AdjustSelectedDigit(1);
+ 363   3                      RTC_WriteDateTime(&rtc_save_datetime))
+ 364   3                  {
+ 365   4                      RS485_UpdateLiveRtcRegisters();
+ 366   4                      if (RTC_SaveDateTimeToEEPROM(&rtc_save_datetime))
+ 367   4                      {
+ 368   5                          Board_Beep(RTC_EDIT_SAVE_BEEP_MS);
+ 369   5                      }
+ 370   4                      else
+ 371   4                      {
+ 372   5                          Board_Beep(RTC_EDIT_SAVE_ERROR_BEEP_MS);
+ 373   5                      }
+ 374   4                      rtc_edit_active = 0;
+ 375   4                      customer_display_timer = 0;
+ 376   4                      customer_value_refresh_timer = 0;
+ 377   4                      LCD_UI_ShowCustomerScreen(customer_display_screen);
+ 378   4                  }
+ 379   3                  else
+ 380   3                  {
+ 381   4                      Board_Beep(RTC_EDIT_SAVE_ERROR_BEEP_MS);
+ 382   4                  }
+ 383   3                  screen_changed = 1;
+ 384   3              }
+ 385   2              else if (rtc_edit_active)
+ 386   2              {
+ 387   3                  if (switch_press_events & BOARD_SWITCH_1)
+ 388   3                  {
+ 389   4                      rtc_edit_digit = (uint8_t)((rtc_edit_digit + 1) %
+ 390   4                          RTC_EDIT_DIGIT_COUNT);
  391   4                      screen_changed = 1;
  392   4                  }
- 393   3                  else if (switch_events & BOARD_SWITCH_3_RELEASED)
+ 393   3                  else if (switch_press_events & BOARD_SWITCH_2)
  394   3                  {
- 395   4                      RTC_AdjustSelectedDigit(0);
+ 395   4                      RTC_AdjustSelectedDigit(1);
  396   4                      screen_changed = 1;
  397   4                  }
- 398   3              }
- 399   2      
- 400   2              if (!rtc_edit_active && (switch_press_events & BOARD_SWITCH_1))
- 401   2              {
- 402   3                  customer_display_screen = LCD_UI_NextCustomerScreen(
- 403   3                      customer_display_screen);
- 404   3                  customer_display_timer = 0;
- 405   3                  customer_value_refresh_timer = 0;
- 406   3                  LCD_UI_ShowCustomerScreen(customer_display_screen);
- 407   3              }
- 408   2      
- 409   2              backlight_timeout = slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET];
- 410   2              if (backlight_timeout == 0)
- 411   2              {
- 412   3                  backlight_idle_seconds = 0;
- 413   3                  backlight_idle_ms = 0;
- 414   3                  back_light_on = BACK_LIGHT_ON;
- 415   3              }
- 416   2              else if (backlight_activity)
- 417   2              {
- 418   3                  backlight_idle_seconds = 0;
- 419   3                  backlight_idle_ms = 0;
- 420   3                  back_light_on = BACK_LIGHT_ON;
- 421   3              }
- 422   2              else if (back_light_on == BACK_LIGHT_ON)
- 423   2              {
- 424   3                  backlight_idle_ms++;
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 8   
+ 398   3                  else if (switch_events & BOARD_SWITCH_3_RELEASED)
+ 399   3                  {
+ 400   4                      RTC_AdjustSelectedDigit(0);
+ 401   4                      screen_changed = 1;
+ 402   4                  }
+ 403   3              }
+ 404   2      
+ 405   2              if (!rtc_edit_active && (switch_press_events & BOARD_SWITCH_1))
+ 406   2              {
+ 407   3                  customer_display_screen = LCD_UI_NextCustomerScreen(
+ 408   3                      customer_display_screen);
+ 409   3                  customer_display_timer = 0;
+ 410   3                  customer_value_refresh_timer = 0;
+ 411   3                  LCD_UI_ShowCustomerScreen(customer_display_screen);
+ 412   3              }
+ 413   2      
+ 414   2              backlight_timeout = slave_holding_registers[BACKLIGHT_TIMEOUT_OFFSET];
+ 415   2              if (backlight_timeout == 0)
+ 416   2              {
+ 417   3                  backlight_idle_seconds = 0;
+ 418   3                  backlight_idle_ms = 0;
+ 419   3                  back_light_on = BACK_LIGHT_ON;
+ 420   3              }
+ 421   2              else if (backlight_activity)
+ 422   2              {
+ 423   3                  backlight_idle_seconds = 0;
+ 424   3                  backlight_idle_ms = 0;
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 8   
 
- 425   3                  if (backlight_idle_ms >= 1000)
- 426   3                  {
- 427   4                      backlight_idle_ms = 0;
- 428   4                      if (backlight_idle_seconds < backlight_timeout)
- 429   4                      {
- 430   5                          backlight_idle_seconds++;
- 431   5                      }
- 432   4                      if (backlight_idle_seconds >= backlight_timeout)
- 433   4                      {
- 434   5                          back_light_on = BACK_LIGHT_OFF;
- 435   5                      }
- 436   4                  }
- 437   3              }
- 438   2      
- 439   2              if (((back_light_on == BACK_LIGHT_ON) ? 1 : 0) != backlight_applied)
- 440   2              {
- 441   3                  LCD_UI_ApplyBacklight();
- 442   3                  backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
- 443   3              }
- 444   2      
- 445   2              if (rtc_edit_active)
- 446   2              {
- 447   3                  if (screen_changed) LCD_UI_ShowRtcEdit(rtc_edit_digit);
+ 425   3                  back_light_on = BACK_LIGHT_ON;
+ 426   3              }
+ 427   2              else if (back_light_on == BACK_LIGHT_ON)
+ 428   2              {
+ 429   3                  backlight_idle_ms++;
+ 430   3                  if (backlight_idle_ms >= 1000)
+ 431   3                  {
+ 432   4                      backlight_idle_ms = 0;
+ 433   4                      if (backlight_idle_seconds < backlight_timeout)
+ 434   4                      {
+ 435   5                          backlight_idle_seconds++;
+ 436   5                      }
+ 437   4                      if (backlight_idle_seconds >= backlight_timeout)
+ 438   4                      {
+ 439   5                          back_light_on = BACK_LIGHT_OFF;
+ 440   5                      }
+ 441   4                  }
+ 442   3              }
+ 443   2      
+ 444   2              if (((back_light_on == BACK_LIGHT_ON) ? 1 : 0) != backlight_applied)
+ 445   2              {
+ 446   3                  LCD_UI_ApplyBacklight();
+ 447   3                  backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
  448   3              }
- 449   2              else
- 450   2              {
- 451   3                  if ((prepaid_events & PREPAID_UI_EVENT_COMPANY) &&
- 452   3                      customer_display_screen == LCD_UI_SCREEN_1_CUSTOMER_ID)
- 453   3                  {
- 454   4                      LCD_UI_ShowCompanyName();
- 455   4                  }
- 456   3                  if (customer_display_timer >= (CUSTOMER_SCREEN_TICKS - 1))
- 457   3                  {
- 458   4                      customer_display_timer = 0;
- 459   4                      customer_display_screen = LCD_UI_NextCustomerScreen(
- 460   4                          customer_display_screen);
- 461   4                      LCD_UI_ShowCustomerScreen(customer_display_screen);
- 462   4                  }
- 463   3                  else
- 464   3                  {
- 465   4                      customer_display_timer++;
- 466   4                  }
- 467   3                  if (customer_value_refresh_timer >=
- 468   3                      (CUSTOMER_VALUE_REFRESH_TICKS - 1))
+ 449   2      
+ 450   2              if (rtc_edit_active)
+ 451   2              {
+ 452   3                  if (screen_changed) LCD_UI_ShowRtcEdit(rtc_edit_digit);
+ 453   3              }
+ 454   2              else
+ 455   2              {
+ 456   3                  if ((prepaid_events & PREPAID_UI_EVENT_COMPANY) &&
+ 457   3                      customer_display_screen == LCD_UI_SCREEN_1_CUSTOMER_ID)
+ 458   3                  {
+ 459   4                      LCD_UI_ShowCompanyName();
+ 460   4                  }
+ 461   3                  if (customer_display_timer >= (CUSTOMER_SCREEN_TICKS - 1))
+ 462   3                  {
+ 463   4                      customer_display_timer = 0;
+ 464   4                      customer_display_screen = LCD_UI_NextCustomerScreen(
+ 465   4                          customer_display_screen);
+ 466   4                      LCD_UI_ShowCustomerScreen(customer_display_screen);
+ 467   4                  }
+ 468   3                  else
  469   3                  {
- 470   4                      customer_value_refresh_timer = 0;
- 471   4                      if (customer_display_screen == LCD_UI_SCREEN_10_LOW_BALANCE_ALERT &&
- 472   4                          slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] != 1)
- 473   4                      {
- 474   5                          customer_display_screen = LCD_UI_NextCustomerScreen(
- 475   5                              customer_display_screen);
- 476   5                          customer_display_timer = 0;
- 477   5                      }
- 478   4                      if (customer_display_screen != LCD_UI_SCREEN_1_CUSTOMER_ID)
- 479   4                      {
- 480   5                          LCD_UI_ShowCustomerScreen(customer_display_screen);
- 481   5                      }
- 482   4                  }
- 483   3                  else
- 484   3                  {
- 485   4                      customer_value_refresh_timer++;
- 486   4                  }
-C51 COMPILER V9.60.0.0   MAIN                                                              10/30/2026 13:09:40 PAGE 9   
+ 470   4                      customer_display_timer++;
+ 471   4                  }
+ 472   3                  if (customer_value_refresh_timer >=
+ 473   3                      (CUSTOMER_VALUE_REFRESH_TICKS - 1))
+ 474   3                  {
+ 475   4                      customer_value_refresh_timer = 0;
+ 476   4                      if (customer_display_screen == LCD_UI_SCREEN_10_LOW_BALANCE_ALERT &&
+ 477   4                          slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] != 1)
+ 478   4                      {
+ 479   5                          customer_display_screen = LCD_UI_NextCustomerScreen(
+ 480   5                              customer_display_screen);
+ 481   5                          customer_display_timer = 0;
+ 482   5                      }
+ 483   4                      if (customer_display_screen != LCD_UI_SCREEN_1_CUSTOMER_ID)
+ 484   4                      {
+ 485   5                          LCD_UI_ShowCustomerScreen(customer_display_screen);
+ 486   5                      }
+C51 COMPILER V9.60.0.0   MAIN                                                              11/02/2026 15:04:40 PAGE 9   
 
- 487   3              }
- 488   2              UpdateLowBalanceBuzzer();
- 489   2              Board_DelayMs(1);
- 490   2          }
- 491   1      }
+ 487   4                  }
+ 488   3                  else
+ 489   3                  {
+ 490   4                      customer_value_refresh_timer++;
+ 491   4                  }
+ 492   3              }
+ 493   2              UpdateLowBalanceBuzzer();
+ 494   2              Board_DelayMs(1);
+ 495   2          }
+ 496   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   2503    ----
+   CODE SIZE        =   2515    ----
    CONSTANT SIZE    =   ----    ----
    XDATA SIZE       =     35      45
    PDATA SIZE       =   ----    ----

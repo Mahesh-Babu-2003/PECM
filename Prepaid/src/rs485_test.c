@@ -152,6 +152,12 @@ static int32_t prepaid_total_recharge_amount;
 static int32_t prepaid_deduction_baseline;
 static int32_t prepaid_current_balance;
 static uint8_t prepaid_relay_sync_pending;
+static uint8_t load_control_elapsed_seconds;
+static uint32_t load_control_previous_time_seconds;
+static uint8_t load_control_clock_initialized;
+static uint16_t load_overlimit_elapsed_seconds;
+static uint32_t load_reconnect_elapsed_seconds;
+static uint8_t load_overload_disconnected;
 static uint8_t prepaid_save_pending;
 static uint32_t prepaid_save_timer_ms;
 static uint8_t meter_eeprom_save_pending;
@@ -246,6 +252,12 @@ static void RS485_UpdateSavedTimestampRegisters(void)
         last_recharge_timestamp.minutes;
     slave_holding_registers[RECHARGE_TIMESTAMP_SECOND_OFFSET] =
         last_recharge_timestamp.seconds;
+}
+
+static void RS485_UpdatePort2CommunicationFlag(void)
+{
+    slave_holding_registers[PORT2_COMMUNICATION_LOST_OFFSET] =
+        energy_meter_connected ? 0 : 1;
 }
 
 static uint8_t RS485_EvenParity(uint8_t value)
@@ -394,6 +406,11 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
         /* Recharge writes are interpreted as signed 16-bit adjustments. */
         return 1;
     }
+    if (offset == BALANCE_RESET_OFFSET)
+    {
+        /* 40063 is a momentary command; it always reads back as zero. */
+        return (uint8_t)(value == 1);
+    }
     if (offset == TAMPER_EVENT_OFFSET)
     {
         return (uint8_t)(value == 0 &&
@@ -424,9 +441,10 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     {
         return (uint8_t)(value <= 5);
     }
-    if (offset == DISCONNECT_MODE_OFFSET)
+    if (offset == LOAD_PARAMETER_OFFSET)
     {
-        return (uint8_t)(value <= 1);
+        /* 0 = kWh totals, 1 = kVAh totals, 3 = meter register 40201. */
+        return (uint8_t)(value == 0 || value == 1 || value == 3);
     }
     return (uint8_t)(
         (offset >= MAIN_KWH_RATE_OFFSET &&
@@ -434,7 +452,8 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
         offset == LOW_BALANCE_THRESHOLD_OFFSET ||
         offset == BACKLIGHT_TIMEOUT_OFFSET ||
         Prepaid_IsConsumptionOffset(offset) ||
-        offset == LOAD_LIMIT_OFFSET || offset == TIME_LIMIT_OFFSET);
+        offset == LOAD_LIMIT_OFFSET || offset == TIME_LIMIT_OFFSET ||
+        offset == RECONNECT_DELAY_OFFSET);
 }
 
 static uint8_t RS485_IsBillingParameterOffset(uint16_t offset)
@@ -446,7 +465,7 @@ static uint8_t RS485_IsBillingParameterOffset(uint16_t offset)
         Prepaid_IsConsumptionOffset(offset) ||
         offset == BACKLIGHT_TIMEOUT_OFFSET ||
         offset == BILLING_PARAMETER_OFFSET ||
-        (offset >= LOAD_LIMIT_OFFSET && offset <= DISCONNECT_MODE_OFFSET));
+        (offset >= LOAD_LIMIT_OFFSET && offset <= LOAD_PARAMETER_OFFSET));
 }
 
 static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
@@ -482,8 +501,9 @@ static uint8_t Prepaid_ChangeFlagForOffset(uint16_t offset)
     {
         return PREPAID_CHANGE_CONSUMPTION;
     }
-    if (offset >= LOAD_LIMIT_OFFSET &&
-        offset <= CONSUMPTION_AFTER_DISCONNECT_OFFSET)
+    if ((offset >= LOAD_LIMIT_OFFSET &&
+         offset <= CONSUMPTION_AFTER_DISCONNECT_OFFSET) ||
+        offset == BMS_RELAY_OVERRIDE_OFFSET)
     {
         return PREPAID_CHANGE_SETTINGS;
     }
@@ -513,6 +533,10 @@ static uint8_t Prepaid_SetAllRelays(uint8_t turn_on)
     uint8_t relay_index;
     uint8_t changed;
 
+    if (load_overload_disconnected)
+    {
+        turn_on = 0;
+    }
     changed = 0;
     for (relay_index = 0; relay_index < SLAVE_RELAY_COUNT; relay_index++)
     {
@@ -1102,8 +1126,16 @@ static uint8_t Prepaid_CompanyRegisterIsValid(uint16_t value)
 
     high_byte = (uint8_t)(value >> 8);
     low_byte = (uint8_t)value;
-    return (uint8_t)((high_byte == 0 || (high_byte >= 32 && high_byte <= 126)) &&
-        (low_byte == 0 || (low_byte >= 32 && low_byte <= 126)));
+    /* Each register contains two company-name characters. Padding uses NUL;
+     * every supplied character must be an ASCII letter or digit. */
+    return (uint8_t)((high_byte == 0 ||
+            (high_byte >= '0' && high_byte <= '9') ||
+            (high_byte >= 'A' && high_byte <= 'Z') ||
+            (high_byte >= 'a' && high_byte <= 'z')) &&
+        (low_byte == 0 ||
+            (low_byte >= '0' && low_byte <= '9') ||
+            (low_byte >= 'A' && low_byte <= 'Z') ||
+            (low_byte >= 'a' && low_byte <= 'z')));
 }
 
 static uint32_t Prepaid_ReadRecordU32(uint8_t offset)
@@ -1361,6 +1393,20 @@ static void Prepaid_RecomputeBalance(void)
     prepaid_relay_sync_pending = 1;
 }
 
+static void Prepaid_ResetBalanceToZero(void)
+{
+    /* Preserve cumulative meter totals.  Set the retained credit to the
+     * selected-mode cost so that the next balance calculation is exactly 0. */
+    prepaid_total_recharge_amount = Prepaid_GetSelectedConsumptionCost();
+    prepaid_deduction_baseline = prepaid_total_recharge_amount;
+    Prepaid_SetBalance(0);
+    slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] = 0;
+    prepaid_relay_sync_pending = 1;
+    PrepaidEeprom_RequestSave();
+    prepaid_ui_events |= PREPAID_UI_EVENT_BALANCE |
+        PREPAID_UI_EVENT_ACTIVITY;
+}
+
 static void Prepaid_ServiceBalanceRelays(void)
 {
     uint8_t relay_index;
@@ -1369,8 +1415,12 @@ static void Prepaid_ServiceBalanceRelays(void)
 
     if (!prepaid_relay_sync_pending) return;
     prepaid_relay_sync_pending = 0;
-    desired_state = ((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0) ?
-        1 : 0;
+    desired_state = ((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0 ||
+        slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0) ? 1 : 0;
+    if (load_overload_disconnected)
+    {
+        desired_state = 0;
+    }
     relays_changed = 0;
     for (relay_index = 0; relay_index < SLAVE_RELAY_COUNT; relay_index++)
     {
@@ -1389,6 +1439,162 @@ static void Prepaid_ServiceBalanceRelays(void)
             PREPAID_UI_EVENT_ACTIVITY;
     }
     Prepaid_UpdateRelayDisconnectStatus();
+}
+
+static uint8_t Prepaid_GetLoadParameterValue(uint32_t *value)
+{
+    switch (slave_holding_registers[LOAD_PARAMETER_OFFSET])
+    {
+    case 0:
+        *value = (uint32_t)slave_holding_registers[MAIN_KWH_CONSUMPTION_OFFSET] +
+            slave_holding_registers[DG_KWH_CONSUMPTION_OFFSET] +
+            slave_holding_registers[SOLAR_KWH_CONSUMPTION_OFFSET];
+        return 1;
+    case 1:
+        *value = (uint32_t)slave_holding_registers[MAIN_KVAH_CONSUMPTION_OFFSET] +
+            slave_holding_registers[DG_KVAH_CONSUMPTION_OFFSET] +
+            slave_holding_registers[SOLAR_KVAH_CONSUMPTION_OFFSET];
+        return 1;
+    case 3:
+        if (!energy_meter_data_valid)
+        {
+            return 0;
+        }
+        *value = energy_meter_registers[0];
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void Prepaid_ServiceLoadControl(void)
+{
+    uint32_t load_parameter_value;
+    uint32_t reconnect_delay_seconds;
+    uint8_t elapsed_seconds;
+    uint16_t load_limit;
+    uint16_t overload_delay_seconds;
+    uint8_t load_parameter_valid;
+
+    elapsed_seconds = load_control_elapsed_seconds;
+    load_control_elapsed_seconds = 0;
+
+    load_limit = slave_holding_registers[LOAD_LIMIT_OFFSET];
+    if (load_limit == 0)
+    {
+        load_overlimit_elapsed_seconds = 0;
+        load_reconnect_elapsed_seconds = 0;
+        if (load_overload_disconnected)
+        {
+            load_overload_disconnected = 0;
+            prepaid_relay_sync_pending = 1;
+        }
+        return;
+    }
+
+    if (load_overload_disconnected)
+    {
+        reconnect_delay_seconds =
+            (uint32_t)slave_holding_registers[RECONNECT_DELAY_OFFSET] * 60UL;
+        if (reconnect_delay_seconds == 0)
+        {
+            load_overload_disconnected = 0;
+            load_reconnect_elapsed_seconds = 0;
+            prepaid_relay_sync_pending = 1;
+        }
+        else if (elapsed_seconds != 0)
+        {
+            load_reconnect_elapsed_seconds += elapsed_seconds;
+            if (load_reconnect_elapsed_seconds >= reconnect_delay_seconds)
+            {
+                load_overload_disconnected = 0;
+                load_reconnect_elapsed_seconds = 0;
+                prepaid_relay_sync_pending = 1;
+            }
+        }
+        return;
+    }
+
+    load_parameter_valid =
+        Prepaid_GetLoadParameterValue(&load_parameter_value);
+    if (!load_parameter_valid || load_parameter_value <= load_limit)
+    {
+        load_overlimit_elapsed_seconds = 0;
+        return;
+    }
+
+    overload_delay_seconds = slave_holding_registers[TIME_LIMIT_OFFSET];
+    if (overload_delay_seconds == 0)
+    {
+        load_overload_disconnected = 1;
+        load_reconnect_elapsed_seconds = 0;
+        load_overlimit_elapsed_seconds = 0;
+        prepaid_relay_sync_pending = 1;
+        return;
+    }
+
+    if (elapsed_seconds != 0)
+    {
+        if (load_overlimit_elapsed_seconds >= overload_delay_seconds ||
+            elapsed_seconds >=
+                (overload_delay_seconds - load_overlimit_elapsed_seconds))
+        {
+            load_overlimit_elapsed_seconds = overload_delay_seconds;
+        }
+        else
+        {
+            load_overlimit_elapsed_seconds += elapsed_seconds;
+        }
+        if (load_overlimit_elapsed_seconds >= overload_delay_seconds)
+        {
+            load_overload_disconnected = 1;
+            load_reconnect_elapsed_seconds = 0;
+            load_overlimit_elapsed_seconds = 0;
+            prepaid_relay_sync_pending = 1;
+        }
+    }
+}
+
+void RS485_UpdateLoadControlClock(void)
+{
+    uint32_t current_time_seconds;
+    uint32_t elapsed_seconds;
+
+    if (!rtc_datetime_valid)
+    {
+        load_control_clock_initialized = 0;
+        load_control_elapsed_seconds = 0;
+        return;
+    }
+
+    current_time_seconds =
+        ((uint32_t)rtc_datetime.hours * 3600UL) +
+        ((uint32_t)rtc_datetime.minutes * 60UL) +
+        rtc_datetime.seconds;
+    if (!load_control_clock_initialized)
+    {
+        load_control_previous_time_seconds = current_time_seconds;
+        load_control_clock_initialized = 1;
+        load_control_elapsed_seconds = 0;
+        return;
+    }
+
+    if (current_time_seconds >= load_control_previous_time_seconds)
+    {
+        elapsed_seconds =
+            current_time_seconds - load_control_previous_time_seconds;
+    }
+    else
+    {
+        elapsed_seconds = (86400UL - load_control_previous_time_seconds) +
+            current_time_seconds;
+    }
+    load_control_previous_time_seconds = current_time_seconds;
+
+    /* Ignore large jumps caused by RTC adjustment or a prolonged clock-read
+     * failure; they must not instantly expire a load-control timer. */
+    load_control_elapsed_seconds = (elapsed_seconds <= 5) ?
+        (uint8_t)elapsed_seconds : 0;
 }
 
 static void Prepaid_SetDefaults(void)
@@ -1444,7 +1650,7 @@ static void Prepaid_SetDefaults(void)
     slave_holding_registers[RELAY_DISCONNECT_STATUS_OFFSET] = 1;
     slave_holding_registers[LOAD_LIMIT_OFFSET] = 0;
     slave_holding_registers[TIME_LIMIT_OFFSET] = 0;
-    slave_holding_registers[DISCONNECT_MODE_OFFSET] = 0;
+    slave_holding_registers[RECONNECT_DELAY_OFFSET] = 0;
     slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] = 0;
     slave_holding_registers[CONSUMPTION_AFTER_DISCONNECT_OFFSET] = 0;
     Prepaid_RecomputeBalance();
@@ -1542,10 +1748,14 @@ static void PrepaidEeprom_Load(void)
             Prepaid_ReadRecordU16(32);
         slave_holding_registers[LOAD_LIMIT_OFFSET] = Prepaid_ReadRecordU16(34);
         slave_holding_registers[TIME_LIMIT_OFFSET] = Prepaid_ReadRecordU16(36);
-        slave_holding_registers[DISCONNECT_MODE_OFFSET] =
+        slave_holding_registers[LOAD_PARAMETER_OFFSET] =
             Prepaid_ReadRecordU16(38);
+        slave_holding_registers[RECONNECT_DELAY_OFFSET] =
+            Prepaid_ReadRecordU16(82);
         if (slave_holding_registers[BILLING_PARAMETER_OFFSET] > 5 ||
-            slave_holding_registers[DISCONNECT_MODE_OFFSET] > 1)
+            (slave_holding_registers[LOAD_PARAMETER_OFFSET] != 0 &&
+             slave_holding_registers[LOAD_PARAMETER_OFFSET] != 1 &&
+             slave_holding_registers[LOAD_PARAMETER_OFFSET] != 3))
         {
             Prepaid_SetDefaults();
             return;
@@ -1582,7 +1792,7 @@ static void PrepaidEeprom_Load(void)
         slave_holding_registers[BILLING_PARAMETER_OFFSET] = 0;
         slave_holding_registers[LOAD_LIMIT_OFFSET] = 0;
         slave_holding_registers[TIME_LIMIT_OFFSET] = 0;
-        slave_holding_registers[DISCONNECT_MODE_OFFSET] = 0;
+        slave_holding_registers[RECONNECT_DELAY_OFFSET] = 0;
         consumption_offset = 50;
     }
     for (index = 0; index < 3; index++)
@@ -1746,7 +1956,7 @@ static void PrepaidEeprom_BuildRecord(void)
     Prepaid_WriteRecordU16(36,
         slave_holding_registers[TIME_LIMIT_OFFSET]);
     Prepaid_WriteRecordU16(38,
-        slave_holding_registers[DISCONNECT_MODE_OFFSET]);
+        slave_holding_registers[LOAD_PARAMETER_OFFSET]);
     Prepaid_WriteRecordU16(40,
         slave_holding_registers[MAIN_CONSUMPTION_OFFSET]);
     Prepaid_WriteRecordU16(42,
@@ -1773,8 +1983,8 @@ static void PrepaidEeprom_BuildRecord(void)
         &tamper_timestamp);
     Prepaid_WriteTimestamp(PREPAID_RECHARGE_TIMESTAMP_OFFSET,
         &last_recharge_timestamp);
-    prepaid_eeprom_record[82] = 0;
-    prepaid_eeprom_record[83] = 0;
+    Prepaid_WriteRecordU16(82,
+        slave_holding_registers[RECONNECT_DELAY_OFFSET]);
     crc = Modbus_Crc16(prepaid_eeprom_record, PREPAID_RECORD_SIZE - 2);
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 2] = (uint8_t)crc;
     prepaid_eeprom_record[PREPAID_RECORD_SIZE - 1] = (uint8_t)(crc >> 8);
@@ -1843,6 +2053,14 @@ static void Prepaid_CommitChanges(uint8_t change_flags)
         PREPAID_CHANGE_RATES | PREPAID_CHANGE_THRESHOLD))
     {
         Prepaid_RecomputeBalance();
+    }
+    if ((change_flags & PREPAID_CHANGE_CREDIT) &&
+        (int16_t)slave_holding_registers[RECHARGE_INPUT_OFFSET] != 0 &&
+        (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0)
+    {
+        /* A successful recharge returns control to normal balance logic. */
+        slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] = 0;
+        prepaid_relay_sync_pending = 1;
     }
     if (change_flags & PREPAID_CHANGE_SETTINGS)
     {
@@ -2381,6 +2599,11 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             return;
         }
 
+        /* 40062 is a live communication-loss indication, not a retained
+         * status.  A successful Port 2 meter reply clears it; a timeout,
+         * exception, or invalid reply sets it. */
+        RS485_UpdatePort2CommunicationFlag();
+
         /* Controller registers use offsets 0..99; meter data uses 200..249. */
         if (start_address < SLAVE_REGISTER_COUNT)
         {
@@ -2483,6 +2706,11 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             if (start_address == TAMPER_EVENT_OFFSET)
             {
                 tamper_event_count = 0;
+            }
+            if (start_address == BALANCE_RESET_OFFSET)
+            {
+                Prepaid_ResetBalanceToZero();
+                slave_holding_registers[BALANCE_RESET_OFFSET] = 0;
             }
             if (RS485_IsCommunicationConfigOffset(start_address))
             {
@@ -2616,6 +2844,11 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                 if (register_offset == RTC_SYNC_OFFSET)
                 {
                     RS485_ServiceClockSyncRequest(value);
+                }
+                if (register_offset == BALANCE_RESET_OFFSET)
+                {
+                    Prepaid_ResetBalanceToZero();
+                    slave_holding_registers[BALANCE_RESET_OFFSET] = 0;
                 }
             }
             if (register_offset == TAMPER_EVENT_OFFSET)
@@ -2805,6 +3038,12 @@ void RS485_TestInit(void)
     meter_eeprom_save_timer_ms = 0;
     prepaid_save_pending = 0;
     prepaid_save_timer_ms = 0;
+    load_control_elapsed_seconds = 0;
+    load_control_previous_time_seconds = 0;
+    load_control_clock_initialized = 0;
+    load_overlimit_elapsed_seconds = 0;
+    load_reconnect_elapsed_seconds = 0;
+    load_overload_disconnected = 0;
     prepaid_ui_events = 0;
     tamper_previous_status = Board_GetTamperStatus();
     tamper_event_count = tamper_previous_status ? 1 : 0;
@@ -2919,7 +3158,9 @@ void RS485_Poll(void)
     }
 
     /* Apply balance/override relay changes after the Modbus response. */
+    Prepaid_ServiceLoadControl();
     Prepaid_ServiceBalanceRelays();
+    RS485_UpdatePort2CommunicationFlag();
 
     if (master_waiting)
     {

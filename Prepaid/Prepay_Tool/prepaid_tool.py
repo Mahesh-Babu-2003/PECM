@@ -10,9 +10,12 @@ Run:       python prepaid_tool.py
 """
 import csv
 import datetime
+import json
+import os
 import queue
 import struct
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -29,7 +32,11 @@ PARITY_NAMES = {0: "None", 1: "Even", 2: "Odd"}
 PARITY_FROM_NAME = {v: k for k, v in PARITY_NAMES.items()}
 BILLING_NAMES = {0: "kWh", 1: "kVAh", 2: "PF", 3: "kW", 4: "kVA", 5: "kVArh"}
 OVERRIDE_NAMES = {0: "Automatic (balance control)", 1: "BMS relay override"}
-LOAD_PARAMETER_NAMES = {i: f"Current Ch{i + 1}" for i in range(12)}
+LOAD_PARAMETER_NAMES = {
+    0: "kWh totals",
+    1: "kVAh totals",
+    3: "Meter register 40201 value",
+}
 BAUDS = [4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200]
 
 CONTROLLER_REG_COUNT = 100
@@ -70,10 +77,10 @@ REGS = {
     28: ("Tamper event count (write 0 to clear)", "RW", "u16"),
     29: ("Billing parameter", "RW", "billing"),
     30: ("All relays disconnected", "R", "bool"),
-    31: ("Max load current (A)", "RW", "u16"),
+    31: ("Max load threshold (selected units)", "RW", "u16"),
     32: ("Max load delay (s; 0 = immediate)", "RW", "u16"),
     33: ("Relay reconnect delay (min)", "RW", "u16"),
-    34: ("Load parameter selection", "RW", "load_parameter"),
+    34: ("Load parameter selection (0=kWh, 1=kVAh, 3=40201)", "RW", "load_parameter"),
     35: ("Consumption after disconnection", "RW", "bool"),
     36: ("RTC year", "R", "u16"),
     37: ("RTC month", "R", "u16"),
@@ -101,8 +108,9 @@ REGS = {
     59: ("Last recharge timestamp second", "R", "u16"),
     60: ("BMS relay override", "RW", "override"),
     61: ("Port 2 meter communication lost", "R", "bool"),
+    62: ("Reset balance to 0 (write 1)", "RW", "command"),
 }
-for _off in range(62, CONTROLLER_REG_COUNT):
+for _off in range(63, CONTROLLER_REG_COUNT):
     REGS[_off] = ("Reserved", "R", "u16")
 
 
@@ -156,13 +164,14 @@ def input_hint(off):
         "baud": "Baud rate: " + ", ".join(str(b) for b in BAUDS),
         "parity": "0 = None, 1 = Even, 2 = Odd",
         "id": "1 - 247",
-        "ascii": "Up to 2 ASCII characters",
+        "ascii": "Up to 2 alphanumeric ASCII characters",
         "s16": "Signed integer -32768 .. 32767",
         "u16": "Unsigned integer 0 .. 65535",
         "billing": "0=kWh 1=kVAh 2=PF 3=kW 4=kVA 5=kVArh",
-        "load_parameter": "0 = Current Ch1 through 11 = Current Ch12",
+        "load_parameter": "0 = kWh totals, 1 = kVAh totals, 3 = meter register 40201",
         "override": "0 = Automatic, 1 = BMS override",
         "rtc_sync": "0 = clear, 1 = refresh RTC status",
+        "command": "Write 1 to run this command",
     }[kind]
 
 
@@ -176,8 +185,8 @@ def parse_input(off, text):
         raw = 0
         padded = text.ljust(2, "\0")
         for ch in padded:
-            if ch != "\0" and not 32 <= ord(ch) <= 126:
-                raise ValueError("Printable ASCII only")
+            if ch != "\0" and not (ch.isascii() and ch.isalnum()):
+                raise ValueError("Alphanumeric ASCII characters only")
             raw = (raw << 8) | ord(ch)
         return raw
     try:
@@ -197,7 +206,9 @@ def parse_input(off, text):
     if kind == "billing" and n not in BILLING_NAMES:
         raise ValueError("Billing parameter must be 0 - 5")
     if kind == "load_parameter" and n not in LOAD_PARAMETER_NAMES:
-        raise ValueError("Load parameter must be 0 - 11")
+        raise ValueError("Load parameter must be 0, 1, or 3")
+    if kind == "command" and n != 1:
+        raise ValueError("Write 1 to run this command")
     if kind in ("override", "rtc_sync") and n not in (0, 1):
         raise ValueError("Must be 0 or 1")
     if kind == "s16":
@@ -318,6 +329,18 @@ class App(tk.Tk):
         self.regs = [0] * CONTROLLER_REG_COUNT
         self.regs_valid = False
         self.prev_tamper = None
+        self.tamper_events = []
+        self.tamper_last_seen_count = None
+        local_app_data = os.environ.get(
+            "LOCALAPPDATA", os.path.join(os.path.expanduser("~"),
+                                         "AppData", "Local"))
+        self.tamper_history_path = os.path.join(
+            local_app_data, "PrepayTool", "tamper_events.json")
+        self.loads_disconnected = None
+        self.load_disconnect_started_at = None
+        self.load_reconnect_deadline = None
+        self.load_reconnect_delay_seconds = None
+        self.load_disconnect_dialog = None
         self.cons_dirty = set()
         self.meter_regs = [0] * METER_REG_COUNT
         self.meter_valid = False
@@ -331,6 +354,7 @@ class App(tk.Tk):
         self._build_settings()
         self._build_console()
         self._build_statusbar()
+        self._load_tamper_history()
 
         self.refresh_ports()
         self._update_conn_state()
@@ -492,8 +516,10 @@ class App(tk.Tk):
 
         st = ttk.LabelFrame(top, text="Status")
         st.pack(side="left", fill="both", expand=True, padx=(0, 8))
-        rows = [("Company", "company"), ("Relays", "relays"),
+        rows = [("Company", "company"), ("Loads", "relays"),
+                ("Reconnect countdown (40034)", "reconnect_countdown"),
                 ("Tamper events", "tamper"),
+                ("Tamper event history", "tamper_history"),
                 ("Last tamper event", "tamper_last"),
                 ("Consumption after disconnect", "cad"),
                 ("Device RTC", "rtc"), ("Billing parameter", "billing"),
@@ -505,9 +531,15 @@ class App(tk.Tk):
         for i, (label, key) in enumerate(rows):
             ttk.Label(st, text=label + ":").grid(row=i, column=0,
                                                   sticky="e", padx=6, pady=1)
-            lbl = ttk.Label(st, textvariable=var(key))
+            if key == "tamper_history":
+                lbl = ttk.Combobox(
+                    st, textvariable=var(key), state="readonly", width=34)
+                self.tamper_history_cb = lbl
+            else:
+                lbl = ttk.Label(st, textvariable=var(key))
             lbl.grid(row=i, column=1, sticky="w", padx=6)
-            self.dv_lbl[key] = lbl
+            if key != "tamper_history":
+                self.dv_lbl[key] = lbl
 
         amt = ttk.LabelFrame(top, text="Amounts")
         amt.pack(side="left", fill="both", expand=True)
@@ -555,10 +587,10 @@ class App(tk.Tk):
         act.pack(side="left", fill="both", expand=True)
         for c in range(3):
             act.columnconfigure(c, weight=1, uniform="act")
-        ttk.Button(act, text="Disconnect relays",
+        ttk.Button(act, text="Disconnect loads",
                    command=lambda: self.relay_cmd(1)).grid(
             row=0, column=0, padx=6, pady=5, sticky="ew")
-        ttk.Button(act, text="Connect relays",
+        ttk.Button(act, text="Connect loads",
                    command=lambda: self.relay_cmd(0)).grid(
             row=0, column=1, padx=6, pady=5, sticky="ew")
         ttk.Button(act, text="Clear tamper count",
@@ -685,10 +717,12 @@ class App(tk.Tk):
                                 else "#0a7d2c")
         self.dv["alert"].set("LOW BALANCE ALERT" if alert else "Balance OK")
         self.dv["company"].set(company or "(blank)")
-        self.dv["relays"].set("All disconnected" if r[0] == 1 else
-                              "Connected / not all disconnected")
+        disconnected = r[0] == 1
+        self.dv["relays"].set("All loads disconnected" if disconnected else
+                              "Loads connected / not all disconnected")
+        self._update_load_disconnect(disconnected, r[33])
         self.dv["tamper"].set(str(r[28]))
-        self._track_tamper(r[28])
+        self._track_tamper(r[28], r)
         self.dv["tamper_last"].set(self._saved_timestamp(r, 46, 47))
         self.dv["cad"].set("YES - acknowledge needed" if r[35] else "No")
         self.dv["rtc"].set(
@@ -711,6 +745,82 @@ class App(tk.Tk):
         for o in range(22, 28):
             if o not in self.cons_dirty:
                 self.cons_vars[o].set(str(r[o]))
+
+    def _update_load_disconnect(self, disconnected, reconnect_delay_minutes):
+        now = time.monotonic()
+        delay_seconds = reconnect_delay_minutes * 60
+        previous = self.loads_disconnected
+
+        if disconnected:
+            if previous is not True:
+                self.load_disconnect_started_at = now
+                self.load_reconnect_delay_seconds = delay_seconds
+                self.load_reconnect_deadline = now + delay_seconds
+                self._show_load_disconnect_dialog()
+            elif delay_seconds != self.load_reconnect_delay_seconds:
+                self.load_reconnect_delay_seconds = delay_seconds
+                self.load_reconnect_deadline = (
+                    self.load_disconnect_started_at + delay_seconds)
+            self.loads_disconnected = True
+            self._update_load_reconnect_countdown()
+        else:
+            if previous is True:
+                self._close_load_disconnect_dialog()
+            self.loads_disconnected = False
+            self.load_disconnect_started_at = None
+            self.load_reconnect_deadline = None
+            self.load_reconnect_delay_seconds = None
+            self.dv["reconnect_countdown"].set("Not disconnected")
+
+    def _update_load_reconnect_countdown(self):
+        if self.loads_disconnected is not True:
+            return
+        remaining = max(0, self.load_reconnect_deadline - time.monotonic())
+        total_seconds = int(remaining + 0.999)
+        countdown = (f"{total_seconds // 60:02d}:"
+                     f"{total_seconds % 60:02d}")
+        if total_seconds == 0:
+            countdown += " (waiting for device)"
+        self.dv["reconnect_countdown"].set(countdown)
+        if self.load_disconnect_dialog is not None:
+            if self.load_disconnect_dialog.winfo_exists():
+                self.load_disconnect_countdown_var.set(countdown)
+            else:
+                self.load_disconnect_dialog = None
+
+    def _show_load_disconnect_dialog(self):
+        if (self.load_disconnect_dialog is not None and
+                self.load_disconnect_dialog.winfo_exists()):
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Loads disconnected")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        self.load_disconnect_dialog = dialog
+        self.load_disconnect_countdown_var = tk.StringVar()
+
+        ttk.Label(dialog, text="All loads are disconnected.").pack(
+            padx=20, pady=(16, 4))
+        ttk.Label(
+            dialog,
+            text="The dashboard countdown continues while this notice is open."
+        ).pack(padx=20, pady=4)
+        ttk.Label(dialog, textvariable=self.load_disconnect_countdown_var,
+                  font=("TkDefaultFont", 14, "bold")).pack(padx=20, pady=6)
+        ttk.Button(dialog, text="OK",
+                   command=self._close_load_disconnect_dialog).pack(
+            pady=(4, 14))
+        dialog.protocol("WM_DELETE_WINDOW",
+                        self._close_load_disconnect_dialog)
+        dialog.update_idletasks()
+        dialog.geometry(
+            f"+{self.winfo_rootx() + 100}+{self.winfo_rooty() + 100}")
+
+    def _close_load_disconnect_dialog(self):
+        dialog = self.load_disconnect_dialog
+        self.load_disconnect_dialog = None
+        if dialog is not None and dialog.winfo_exists():
+            dialog.destroy()
 
     @staticmethod
     def _saved_timestamp(regs, valid_offset, first_field_offset):
@@ -740,26 +850,124 @@ class App(tk.Tk):
                 f"Solar {regs[offsets[2]]} {unit}")
 
     # ---- tamper / RTC / consumption helpers ------------------------------
-    def _track_tamper(self, count):
+    def _load_tamper_history(self):
+        try:
+            with open(self.tamper_history_path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if not isinstance(saved, dict):
+                raise ValueError("Tamper history file must contain an object")
+            count = saved.get("last_count")
+            events = saved.get("events")
+            if count is not None and (
+                    not isinstance(count, int) or not 0 <= count <= 5):
+                raise ValueError("Tamper history counter is invalid")
+            if not isinstance(events, list) or len(events) > 5:
+                raise ValueError("Tamper history must contain at most 5 events")
+            for event in events:
+                if (not isinstance(event, dict) or
+                        not isinstance(event.get("number"), int) or
+                        not 1 <= event["number"] <= 5 or
+                        not isinstance(event.get("timestamp"), str)):
+                    raise ValueError("Tamper history contains an invalid event")
+            self.tamper_events = events
+            self.tamper_last_seen_count = count
+            self._refresh_tamper_history_dropdown()
+        except FileNotFoundError:
+            self._refresh_tamper_history_dropdown()
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self.log("ERR", f"Could not load tamper history: {exc}")
+            self.status(f"Could not load tamper history: {exc}")
+            self.tamper_events = []
+            self.tamper_last_seen_count = None
+            self._refresh_tamper_history_dropdown()
+
+    def _save_tamper_history(self):
+        directory = os.path.dirname(self.tamper_history_path)
+        temporary_path = self.tamper_history_path + ".tmp"
+        data = {
+            "last_count": self.tamper_last_seen_count,
+            "events": self.tamper_events[-5:],
+        }
+        try:
+            os.makedirs(directory, exist_ok=True)
+            with open(temporary_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(temporary_path, self.tamper_history_path)
+        except OSError as exc:
+            self.log("ERR", f"Could not save tamper history: {exc}")
+            self.status(f"Could not save tamper history: {exc}")
+
+    def _refresh_tamper_history_dropdown(self):
+        values = [
+            f"Tamper event {event['number']} - {event['timestamp']}"
+            for event in reversed(self.tamper_events[-5:])
+        ]
+        if not values:
+            values = ["No tamper events recorded"]
+        self.tamper_history_cb.configure(values=values)
+        self.dv["tamper_history"].set(values[0])
+
+    @staticmethod
+    def _tamper_event_time(regs):
+        saved_time = App._saved_timestamp(regs, 46, 47)
+        if saved_time != "Not available":
+            return saved_time
+        try:
+            return datetime.datetime(
+                regs[36], regs[37], regs[38], regs[39], regs[40],
+                regs[41]).strftime("%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            return datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    def _append_tamper_event(self, number, timestamp):
+        self.tamper_events.append({
+            "number": number,
+            "timestamp": timestamp,
+        })
+        self.tamper_events = self.tamper_events[-5:]
+
+    def _track_tamper(self, count, regs):
         lbl = self.dv_lbl["tamper"]
         lbl.configure(foreground="#b00020" if count else "#0a7d2c")
-        prev = self.prev_tamper
-        stamp = datetime.datetime.now().strftime("%H:%M:%S")
-        if prev is None:
-            if count:
-                self.dv["tamper_last"].set(f"count {count} (before connect)")
-            else:
-                self.dv["tamper_last"].set("none")
-        elif count != prev:
-            if count == 0:
+        previous = self.tamper_last_seen_count
+        history_changed = False
+        if previous is None:
+            if count and not self.tamper_events:
+                for number in range(1, count + 1):
+                    self._append_tamper_event(number, "Time not recorded")
+                history_changed = True
+            self.tamper_last_seen_count = count
+        elif count == 0:
+            if previous != 0:
+                stamp = datetime.datetime.now().strftime("%H:%M:%S")
                 self.dv["tamper_last"].set(f"cleared at {stamp}")
                 self.log("INFO", "Tamper count cleared")
-            else:
-                self.dv["tamper_last"].set(f"event #{count} at {stamp}")
-                self.log("INFO", f"TAMPER event #{count} detected")
-                self.status(f"TAMPER event #{count} detected at {stamp}")
-                self.bell()
+            self.tamper_last_seen_count = 0
+        elif count != previous:
+            event_numbers = []
+            number = previous
+            while number != count and len(event_numbers) < 5:
+                number = 1 if number == 5 else number + 1
+                event_numbers.append(number)
+            event_time = self._tamper_event_time(regs)
+            for index, event_number in enumerate(event_numbers):
+                timestamp = (event_time if index == len(event_numbers) - 1
+                             else "Time not recorded")
+                self._append_tamper_event(event_number, timestamp)
+            history_changed = bool(event_numbers)
+            stamp = datetime.datetime.now().strftime("%H:%M:%S")
+            self.dv["tamper_last"].set(f"event #{count} at {stamp}")
+            self.log("INFO", f"TAMPER event #{count} detected")
+            self.status(f"TAMPER event #{count} detected at {stamp}")
+            self.bell()
+
+        self.tamper_last_seen_count = count
+        if count == 0 and not self.tamper_events:
+            self.dv["tamper_last"].set("none")
         self.prev_tamper = count
+        if history_changed or previous != self.tamper_last_seen_count:
+            self._save_tamper_history()
+        self._refresh_tamper_history_dropdown()
 
     def _rtc_diff_text(self, r):
         try:
@@ -889,9 +1097,9 @@ class App(tk.Tk):
 
     def relay_cmd(self, value):
         if value == 1 and not messagebox.askyesno(
-                "Disconnect", "Disconnect all three relays?"):
+                "Disconnect", "Disconnect all three loads?"):
             return
-        text = ("All relays disconnect command sent" if value else
+        text = ("All loads disconnect command sent" if value else
                 "Connect command sent (balance control may refuse it)")
         self.write_and_refresh(0, value, text)
 
@@ -907,9 +1115,9 @@ class App(tk.Tk):
     def reset_balance(self):
         if messagebox.askyesno(
                 "Reset balance",
-                "Write 0 to 40044?\n\nThis resets the balance to zero "
-                "(cumulative consumption is kept)."):
-            self.write_and_refresh(43, 0, "Balance reset to zero")
+                "Write 1 to 40063?\n\nThis resets the balance to zero "
+                "while keeping cumulative consumption totals."):
+            self.write_and_refresh(62, 1, "Balance reset to zero")
 
     # ---- generic register write ----------------------------------------
     def write_and_refresh(self, offset, raw, message=None):
@@ -990,6 +1198,7 @@ class App(tk.Tk):
         self.run(job, ok, self.on_error_quiet if quiet else self.on_error_box)
 
     def _poll_tick(self):
+        self._update_load_reconnect_countdown()
         try:
             interval = max(300, int(self.interval_var.get()))
         except ValueError:
@@ -1008,7 +1217,7 @@ class App(tk.Tk):
     # ---- registers tab -----------------------------------------------------
     def _build_registers(self):
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text="Registers 40001-40050")
+        self.nb.add(tab, text="Registers 40001-40100")
         bar = ttk.Frame(tab)
         bar.pack(fill="x", padx=8, pady=6)
         ttk.Button(bar, text="Read all", command=self.read_all).pack(
@@ -1233,7 +1442,7 @@ class App(tk.Tk):
 
         # company name
         cn = ttk.LabelFrame(tab, text="Company name / customer ID "
-                                      "(40008-40012, max 10 chars)")
+                                      "(40008-40012, max 10 alphanumeric characters)")
         cn.pack(fill="x", padx=8, pady=4)
         self.company_var = tk.StringVar()
         ttk.Entry(cn, textvariable=self.company_var, width=16).pack(
@@ -1251,7 +1460,7 @@ class App(tk.Tk):
             (15, "DG kWh rate"), (16, "DG kVAh rate"),
             (17, "Solar kWh rate"), (18, "Solar kVAh rate"),
             (19, "Low-balance threshold"), (21, "Backlight timeout (s)"),
-            (31, "Max load current (A)"),
+            (31, "Max load threshold"),
             (32, "Overload delay (s; 0 = immediate)"),
             (33, "Reconnect delay (min)")]
         self.tl_vars = {}
@@ -1459,7 +1668,7 @@ class App(tk.Tk):
             row=0, column=2, padx=4)
         ttk.Label(man, text="Count / value(s), comma separated").grid(
             row=0, column=3, padx=(10, 2))
-        self.vals_var = tk.StringVar(value="50")
+        self.vals_var = tk.StringVar(value="100")
         ttk.Entry(man, textvariable=self.vals_var, width=22).grid(
             row=0, column=4, padx=4)
         ttk.Button(man, text="Send", command=self.send_manual).grid(
