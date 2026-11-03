@@ -33,15 +33,16 @@ PARITY_FROM_NAME = {v: k for k, v in PARITY_NAMES.items()}
 BILLING_NAMES = {0: "kWh", 1: "kVAh", 2: "PF", 3: "kW", 4: "kVA", 5: "kVArh"}
 OVERRIDE_NAMES = {0: "Automatic (balance control)", 1: "BMS relay override"}
 LOAD_PARAMETER_NAMES = {
-    0: "kWh totals",
-    1: "kVAh totals",
+    0: "Cumulative kWh consumption",
+    1: "Cumulative kVAh consumption",
     3: "Meter register 40201 value",
 }
 BAUDS = [4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200]
 
-CONTROLLER_REG_COUNT = 100
+CONTROLLER_REG_COUNT = 151
+MODBUS_MAX_READ_REGISTERS = 125
 METER_REG_COUNT = 50
-RTC_FIRST = 36   # 40037..40042: year, month, day, hour, minute, second
+RTC_FIRST = 48   # 40049..40054: year, month, day, hour, minute, second
 METER_BASE = 200  # 40201..40250
 
 # offset: (name, access, kind)
@@ -68,49 +69,71 @@ REGS = {
     19: ("Low-balance threshold", "RW", "u16"),
     20: ("Low-balance alert", "R", "bool"),
     21: ("Backlight timeout (s, 0 = always on)", "RW", "u16"),
-    22: ("Mains consumption kWh total", "RW", "u16"),
-    23: ("Mains consumption kVAh total", "RW", "u16"),
-    24: ("DG consumption kWh total", "RW", "u16"),
-    25: ("DG consumption kVAh total", "RW", "u16"),
-    26: ("Solar consumption kWh total", "RW", "u16"),
-    27: ("Solar consumption kVAh total", "RW", "u16"),
-    28: ("Tamper event count (write 0 to clear)", "RW", "u16"),
-    29: ("Billing parameter", "RW", "billing"),
-    30: ("All relays disconnected", "R", "bool"),
-    31: ("Max load threshold (selected units)", "RW", "u16"),
-    32: ("Max load delay (s; 0 = immediate)", "RW", "u16"),
-    33: ("Relay reconnect delay (min)", "RW", "u16"),
-    34: ("Load parameter selection (0=kWh, 1=kVAh, 3=40201)", "RW", "load_parameter"),
-    35: ("Consumption after disconnection", "RW", "bool"),
-    36: ("RTC year", "R", "u16"),
-    37: ("RTC month", "R", "u16"),
-    38: ("RTC day", "R", "u16"),
-    39: ("RTC hour", "R", "u16"),
-    40: ("RTC minute", "R", "u16"),
-    41: ("RTC second", "R", "u16"),
-    42: ("Last recharge amount", "R", "s16"),
-    43: ("Recharge input (signed adjustment)", "RW", "s16"),
-    44: ("Total amount deducted", "R", "u16"),
-    45: ("RTC synchronization status", "RW", "rtc_sync"),
-    46: ("Tamper timestamp valid", "R", "bool"),
-    47: ("Tamper timestamp year", "R", "u16"),
-    48: ("Tamper timestamp month", "R", "u16"),
-    49: ("Tamper timestamp day", "R", "u16"),
-    50: ("Tamper timestamp hour", "R", "u16"),
-    51: ("Tamper timestamp minute", "R", "u16"),
-    52: ("Tamper timestamp second", "R", "u16"),
-    53: ("Last recharge timestamp valid", "R", "bool"),
-    54: ("Last recharge timestamp year", "R", "u16"),
-    55: ("Last recharge timestamp month", "R", "u16"),
-    56: ("Last recharge timestamp day", "R", "u16"),
-    57: ("Last recharge timestamp hour", "R", "u16"),
-    58: ("Last recharge timestamp minute", "R", "u16"),
-    59: ("Last recharge timestamp second", "R", "u16"),
-    60: ("BMS relay override", "RW", "override"),
-    61: ("Port 2 meter communication lost", "R", "bool"),
-    62: ("Reset balance to 0 (write 1)", "RW", "command"),
+    22: ("Mains kWh consumption - old reading", "R", "u16"),
+    23: ("Mains kWh consumption - new reading", "RW", "u16"),
+    24: ("Mains kWh latest consumption difference", "R", "u16"),
+    25: ("Mains kVAh consumption - old reading", "R", "u16"),
+    26: ("Mains kVAh consumption - new reading", "RW", "u16"),
+    27: ("Mains kVAh latest consumption difference", "R", "u16"),
+    28: ("DG kWh consumption - old reading", "R", "u16"),
+    29: ("DG kWh consumption - new reading", "RW", "u16"),
+    30: ("DG kWh latest consumption difference", "R", "u16"),
+    31: ("DG kVAh consumption - old reading", "R", "u16"),
+    32: ("DG kVAh consumption - new reading", "RW", "u16"),
+    33: ("DG kVAh latest consumption difference", "R", "u16"),
+    34: ("Solar kWh consumption - old reading", "R", "u16"),
+    35: ("Solar kWh consumption - new reading", "RW", "u16"),
+    36: ("Solar kWh latest consumption difference", "R", "u16"),
+    37: ("Solar kVAh consumption - old reading", "R", "u16"),
+    38: ("Solar kVAh consumption - new reading", "RW", "u16"),
+    39: ("Solar kVAh latest consumption difference", "R", "u16"),
+    40: ("Tamper event count (write 0 to clear)", "RW", "u16"),
+    41: ("Billing parameter", "RW", "billing"),
+    42: ("All loads disconnected", "R", "bool"),
+    43: ("Max load threshold (selected units)", "RW", "u16"),
+    44: ("Max load delay (s; 0 = immediate)", "RW", "u16"),
+    45: ("Relay reconnect delay (min)", "RW", "u16"),
+    46: ("Load parameter selection (0=kWh, 1=kVAh, 3=40201)", "RW", "load_parameter"),
+    47: ("Consumption after disconnection", "RW", "bool"),
+    48: ("RTC year", "R", "u16"),
+    49: ("RTC month", "R", "u16"),
+    50: ("RTC day", "R", "u16"),
+    51: ("RTC hour", "R", "u16"),
+    52: ("RTC minute", "R", "u16"),
+    53: ("RTC second", "R", "u16"),
+    54: ("Last recharge amount", "R", "s16"),
+    55: ("Recharge input (signed adjustment)", "RW", "s16"),
+    56: ("Total amount deducted", "R", "u16"),
+    57: ("RTC synchronization status", "RW", "rtc_sync"),
+    58: ("Tamper timestamp valid", "R", "bool"),
+    59: ("Tamper timestamp year", "R", "u16"),
+    60: ("Tamper timestamp month", "R", "u16"),
+    61: ("Tamper timestamp day", "R", "u16"),
+    62: ("Tamper timestamp hour", "R", "u16"),
+    63: ("Tamper timestamp minute", "R", "u16"),
+    64: ("Tamper timestamp second", "R", "u16"),
+    65: ("Last recharge timestamp valid", "R", "bool"),
+    66: ("Last recharge timestamp year", "R", "u16"),
+    67: ("Last recharge timestamp month", "R", "u16"),
+    68: ("Last recharge timestamp day", "R", "u16"),
+    69: ("Last recharge timestamp hour", "R", "u16"),
+    70: ("Last recharge timestamp minute", "R", "u16"),
+    71: ("Last recharge timestamp second", "R", "u16"),
+    72: ("BMS relay override", "RW", "override"),
+    73: ("Reset balance to 0 (write 1)", "RW", "command"),
+    74: ("Port 2 meter communication lost", "R", "bool"),
+    75: ("Relay error", "R", "u16"),
+    76: ("RTC error", "R", "u16"),
+    77: ("EEPROM error", "R", "u16"),
+    78: ("Last meter disconnect timestamp valid", "R", "bool"),
+    79: ("Last meter disconnect year", "R", "u16"),
+    80: ("Last meter disconnect month", "R", "u16"),
+    81: ("Last meter disconnect day", "R", "u16"),
+    82: ("Last meter disconnect hour", "R", "u16"),
+    83: ("Last meter disconnect minute", "R", "u16"),
+    84: ("Last meter disconnect second", "R", "u16"),
 }
-for _off in range(63, CONTROLLER_REG_COUNT):
+for _off in range(85, CONTROLLER_REG_COUNT):
     REGS[_off] = ("Reserved", "R", "u16")
 
 
@@ -150,7 +173,7 @@ def display_value(off, raw):
         return str(raw), LOAD_PARAMETER_NAMES.get(raw, "?")
     if kind == "override":
         return str(raw), OVERRIDE_NAMES.get(raw, "?")
-    if off == 0:
+    if off in (0, 42):
         return str(raw), "All disconnected" if raw == 1 else "Not all disconnected"
     if off == 20:
         return str(raw), "ALERT" if raw else "OK"
@@ -168,7 +191,7 @@ def input_hint(off):
         "s16": "Signed integer -32768 .. 32767",
         "u16": "Unsigned integer 0 .. 65535",
         "billing": "0=kWh 1=kVAh 2=PF 3=kW 4=kVA 5=kVArh",
-        "load_parameter": "0 = kWh totals, 1 = kVAh totals, 3 = meter register 40201",
+        "load_parameter": "0 = cumulative kWh, 1 = cumulative kVAh, 3 = meter register 40201",
         "override": "0 = Automatic, 1 = BMS override",
         "rtc_sync": "0 = clear, 1 = refresh RTC status",
         "command": "Write 1 to run this command",
@@ -496,6 +519,26 @@ class App(tk.Tk):
     def _build_dashboard(self):
         tab = ttk.Frame(self.nb)
         self.nb.add(tab, text="Dashboard")
+        self.dashboard_canvas = tk.Canvas(tab, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(
+            tab, orient="vertical", command=self.dashboard_canvas.yview)
+        self.dashboard_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.dashboard_canvas.pack(side="left", fill="both", expand=True)
+        content = ttk.Frame(self.dashboard_canvas)
+        content_window = self.dashboard_canvas.create_window(
+            (0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda event: self.dashboard_canvas.configure(
+                scrollregion=self.dashboard_canvas.bbox("all")))
+        self.dashboard_canvas.bind(
+            "<Configure>",
+            lambda event: self.dashboard_canvas.itemconfigure(
+                content_window, width=event.width))
+        self.bind_all("<MouseWheel>", self._scroll_dashboard, add="+")
+        self.bind_all("<Button-4>", self._scroll_dashboard, add="+")
+        self.bind_all("<Button-5>", self._scroll_dashboard, add="+")
         self.dv = {}  # dashboard variables
         self.dv_lbl = {}  # dashboard label widgets (for colouring)
 
@@ -503,7 +546,7 @@ class App(tk.Tk):
             self.dv[name] = tk.StringVar(value="-")
             return self.dv[name]
 
-        top = ttk.Frame(tab)
+        top = ttk.Frame(content)
         top.pack(fill="x", padx=8, pady=8)
 
         bal = ttk.LabelFrame(top, text="Prepaid balance")
@@ -517,17 +560,21 @@ class App(tk.Tk):
         st = ttk.LabelFrame(top, text="Status")
         st.pack(side="left", fill="both", expand=True, padx=(0, 8))
         rows = [("Company", "company"), ("Loads", "relays"),
-                ("Reconnect countdown (40034)", "reconnect_countdown"),
+                ("Reconnect countdown (40046)", "reconnect_countdown"),
                 ("Tamper events", "tamper"),
                 ("Tamper event history", "tamper_history"),
                 ("Last tamper event", "tamper_last"),
                 ("Consumption after disconnect", "cad"),
                 ("Device RTC", "rtc"), ("Billing parameter", "billing"),
-                ("Selected consumption", "selected_consumption"),
+                ("Selected consumption difference", "selected_consumption"),
                 ("Selected unit rates", "selected_rates"),
                 ("Load parameter", "load_parameter"),
                 ("Port 2 communication", "port2_comm"),
-                ("BMS relay override", "override")]
+                ("Last meter disconnect", "meter_disconnect_time"),
+                ("BMS relay override", "override"),
+                ("Relay error", "relay_error"),
+                ("RTC error", "rtc_error"),
+                ("EEPROM error", "eeprom_error")]
         for i, (label, key) in enumerate(rows):
             ttk.Label(st, text=label + ":").grid(row=i, column=0,
                                                   sticky="e", padx=6, pady=1)
@@ -553,35 +600,79 @@ class App(tk.Tk):
             ttk.Label(amt, textvariable=var(key)).grid(row=i, column=1,
                                                        sticky="w", padx=6)
 
-        mid = ttk.Frame(tab)
+        mid = ttk.Frame(content)
         mid.pack(fill="x", padx=8, pady=4)
 
         cons = ttk.LabelFrame(
-            mid, text="Cumulative consumption (40023-40028) - editable")
+            mid, text="Latest meter difference (new reading - old reading)")
         cons.pack(side="left", fill="y", padx=(0, 8))
         self.cons_vars = {}
         self.cons_entries = {}
-        for c, h in enumerate(("", "kWh", "kVAh")):
+        self.cons_old_vars = {}
+        self.cons_difference_vars = {}
+        self.cons_registers = {}
+        self.cons_rows = []
+        for c, h in enumerate(
+                ("Source", "Unit", "Old reading", "New reading",
+                 "Difference added")):
             ttk.Label(cons, text=h, font=("TkDefaultFont", 9, "bold")).grid(
-                row=0, column=c, padx=10, pady=2)
-        for r, (name, off_kwh, off_kvah) in enumerate((
-                ("Mains", 22, 23), ("DG", 24, 25), ("Solar", 26, 27)),
-                start=1):
-            ttk.Label(cons, text=name).grid(row=r, column=0, padx=10)
-            for col, off in ((1, off_kwh), (2, off_kvah)):
-                v = tk.StringVar(value="-")
-                self.cons_vars[off] = v
-                e = ttk.Entry(cons, textvariable=v, width=8, justify="right")
-                e.grid(row=r, column=col, padx=4, pady=1)
-                e.bind("<KeyRelease>", lambda ev, o=off: self._cons_edited(o))
-                e.bind("<Return>", lambda ev: self.write_consumption())
-                self.cons_entries[off] = e
+                row=0, column=c, padx=5, pady=2)
+        consumption_rows = (
+            ("Mains", "kWh", 22, 23, 24),
+            ("Mains", "kVAh", 25, 26, 27),
+            ("DG", "kWh", 28, 29, 30),
+            ("DG", "kVAh", 31, 32, 33),
+            ("Solar", "kWh", 34, 35, 36),
+            ("Solar", "kVAh", 37, 38, 39),
+        )
+        for row, (source, unit, old_off, new_off, difference_off) in enumerate(
+                consumption_rows, start=1):
+            row_widgets = [
+                ttk.Label(cons, text=source),
+                ttk.Label(cons, text=unit),
+            ]
+            row_widgets[0].grid(row=row, column=0, padx=5)
+            row_widgets[1].grid(row=row, column=1, padx=5)
+            old_var = tk.StringVar(value="-")
+            self.cons_old_vars[new_off] = old_var
+            self.cons_registers[new_off] = (old_off, difference_off)
+            old_label = ttk.Label(cons, textvariable=old_var, width=8,
+                                  anchor="e")
+            old_label.grid(row=row, column=2, padx=3)
+            row_widgets.append(old_label)
+            new_var = tk.StringVar(value="-")
+            self.cons_vars[new_off] = new_var
+            entry = ttk.Entry(cons, textvariable=new_var, width=8,
+                              justify="right")
+            entry.grid(row=row, column=3, padx=3, pady=1)
+            entry.bind("<KeyRelease>",
+                       lambda ev, off=new_off: self._cons_edited(off))
+            entry.bind("<Return>", lambda ev: self.write_consumption())
+            self.cons_entries[new_off] = entry
+            row_widgets.append(entry)
+            difference_var = tk.StringVar(value="-")
+            self.cons_difference_vars[new_off] = difference_var
+            difference_label = ttk.Label(
+                cons, textvariable=difference_var, width=8, anchor="e")
+            difference_label.grid(row=row, column=4, padx=3)
+            row_widgets.append(difference_label)
+            self.cons_rows.append((unit, row_widgets))
+        self.cons_mode_message = ttk.Label(cons, text="")
+        self.cons_mode_message.grid(row=1, column=0, columnspan=5, pady=4)
+        self.cons_mode_message.grid_remove()
         cb = ttk.Frame(cons)
-        cb.grid(row=4, column=0, columnspan=3, pady=(4, 4))
+        self.cons_controls = cb
+        cb.grid(row=7, column=0, columnspan=5, pady=(4, 4))
         ttk.Button(cb, text="Write changes",
                    command=self.write_consumption).pack(side="left", padx=4)
         ttk.Button(cb, text="Reload", command=self.reload_consumption).pack(
             side="left", padx=4)
+        for _, widgets in self.cons_rows:
+            for widget in widgets:
+                widget.grid_remove()
+        self.cons_mode_message.configure(text="Waiting for device billing mode.")
+        self.cons_mode_message.grid(row=1, column=0, columnspan=5, pady=4)
+        cb.grid(row=2, column=0, columnspan=5, pady=(4, 4))
 
         act = ttk.LabelFrame(mid, text="Actions")
         act.pack(side="left", fill="both", expand=True)
@@ -595,12 +686,12 @@ class App(tk.Tk):
             row=0, column=1, padx=6, pady=5, sticky="ew")
         ttk.Button(act, text="Clear tamper count",
                    command=lambda: self.write_and_refresh(
-                       28, 0, "Tamper count cleared "
+                       40, 0, "Tamper count cleared "
                        "(only works while SW4 is secure)")).grid(
             row=0, column=2, padx=6, pady=5, sticky="ew")
         ttk.Button(act, text="Ack disconnect usage",
                    command=lambda: self.write_and_refresh(
-                       35, 0, "Consumption-after-disconnect flag "
+                       47, 0, "Consumption-after-disconnect flag "
                        "acknowledged")).grid(
             row=1, column=0, padx=6, pady=5, sticky="ew")
         ttk.Button(act, text="Reset balance to 0",
@@ -615,10 +706,10 @@ class App(tk.Tk):
         self.recharge_var = tk.StringVar(value="100")
         ttk.Entry(rc, textvariable=self.recharge_var, width=10).pack(
             side="left", padx=6)
-        ttk.Button(rc, text="Apply recharge (40044)",
+        ttk.Button(rc, text="Apply recharge (40056)",
                    command=self.apply_recharge).pack(side="left")
 
-        poll = ttk.Frame(tab)
+        poll = ttk.Frame(content)
         poll.pack(fill="x", padx=8, pady=8)
         ttk.Button(poll, text="Read now", command=self.read_all).pack(
             side="left")
@@ -634,7 +725,18 @@ class App(tk.Tk):
                         variable=self.poll_meter_var).pack(side="left")
         self.last_read_var = tk.StringVar(value="")
         ttk.Label(poll, textvariable=self.last_read_var).pack(side="right")
-        self._build_meter_panel(tab, before=poll)
+        self._build_meter_panel(content, before=poll)
+
+    def _scroll_dashboard(self, event):
+        if self.nb.select() != str(self.dashboard_canvas.master):
+            return
+        if event.num == 4:
+            self.dashboard_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self.dashboard_canvas.yview_scroll(1, "units")
+        elif event.delta:
+            self.dashboard_canvas.yview_scroll(
+                -int(event.delta / 120), "units")
 
     def _build_meter_panel(self, parent, before):
         box = ttk.LabelFrame(parent, text="Energy meter (RISH ML1400) - live")
@@ -717,34 +819,66 @@ class App(tk.Tk):
                                 else "#0a7d2c")
         self.dv["alert"].set("LOW BALANCE ALERT" if alert else "Balance OK")
         self.dv["company"].set(company or "(blank)")
-        disconnected = r[0] == 1
+        disconnected = r[42] == 1
         self.dv["relays"].set("All loads disconnected" if disconnected else
                               "Loads connected / not all disconnected")
-        self._update_load_disconnect(disconnected, r[33])
-        self.dv["tamper"].set(str(r[28]))
-        self._track_tamper(r[28], r)
-        self.dv["tamper_last"].set(self._saved_timestamp(r, 46, 47))
-        self.dv["cad"].set("YES - acknowledge needed" if r[35] else "No")
+        self._update_load_disconnect(disconnected, r[45])
+        self.dv["tamper"].set(str(r[40]))
+        self._track_tamper(r[40], r)
+        self.dv["tamper_last"].set(self._saved_timestamp(r, 58, 59))
+        self.dv["cad"].set("YES - acknowledge needed" if r[47] else "No")
         self.dv["rtc"].set(
-            f"{r[38]:02d}/{r[37]:02d}/{r[36]:04d}  "
-            f"{r[39]:02d}:{r[40]:02d}:{r[41]:02d}" + self._rtc_diff_text(r))
-        self.dv["billing"].set(BILLING_NAMES.get(r[29], str(r[29])))
+            f"{r[50]:02d}/{r[49]:02d}/{r[48]:04d}  "
+            f"{r[51]:02d}:{r[52]:02d}:{r[53]:02d}" + self._rtc_diff_text(r))
+        self.dv["billing"].set(BILLING_NAMES.get(r[41], str(r[41])))
         self.dv["selected_consumption"].set(
             self._selected_billing_values(r, consumption=True))
         self.dv["selected_rates"].set(
             self._selected_billing_values(r, consumption=False))
         self.dv["load_parameter"].set(
-            LOAD_PARAMETER_NAMES.get(r[34], str(r[34])))
+            LOAD_PARAMETER_NAMES.get(r[46], str(r[46])))
         self.dv["port2_comm"].set(
-            "LOST" if r[61] else "OK")
-        self.dv["override"].set(OVERRIDE_NAMES.get(r[60], str(r[60])))
-        self.dv["deducted"].set(str(r[44]))
-        self.dv["last_recharge"].set(str(to_s16(r[42])))
-        self.dv["recharge_time"].set(self._saved_timestamp(r, 53, 54))
+            "LOST" if r[74] else "OK")
+        self.dv["meter_disconnect_time"].set(
+            self._saved_timestamp(r, 78, 79))
+        self.dv["override"].set(OVERRIDE_NAMES.get(r[72], str(r[72])))
+        self.dv["relay_error"].set(str(r[75]))
+        self.dv["rtc_error"].set(str(r[76]))
+        self.dv["eeprom_error"].set(str(r[77]))
+        self.dv["deducted"].set(str(r[56]))
+        self.dv["last_recharge"].set(str(to_s16(r[54])))
+        self.dv["recharge_time"].set(self._saved_timestamp(r, 65, 66))
         self.dv["threshold"].set(str(r[19]))
-        for o in range(22, 28):
-            if o not in self.cons_dirty:
-                self.cons_vars[o].set(str(r[o]))
+        for off, entry in self.cons_entries.items():
+            old_offset, difference_offset = self.cons_registers[off]
+            self.cons_old_vars[off].set(str(r[old_offset]))
+            self.cons_difference_vars[off].set(str(r[difference_offset]))
+            if off not in self.cons_dirty:
+                self.cons_vars[off].set(str(r[off]))
+        self._show_selected_consumption_rows(r[41])
+
+    def _show_selected_consumption_rows(self, billing):
+        selected_unit = {0: "kWh", 1: "kVAh"}.get(billing)
+        visible_row = 1
+        for unit, widgets in self.cons_rows:
+            if unit == selected_unit:
+                for column, widget in enumerate(widgets):
+                    widget.grid(row=visible_row, column=column,
+                                padx=5 if column < 2 else 3,
+                                pady=1 if column == 3 else 0)
+                visible_row += 1
+            else:
+                for widget in widgets:
+                    widget.grid_remove()
+        if selected_unit is None:
+            self.cons_mode_message.configure(
+                text="Consumption display is available for kWh or kVAh billing.")
+            self.cons_mode_message.grid(row=1, column=0, columnspan=5, pady=4)
+            visible_row += 1
+        else:
+            self.cons_mode_message.grid_remove()
+        self.cons_controls.grid(row=visible_row, column=0, columnspan=5,
+                                pady=(4, 4))
 
     def _update_load_disconnect(self, disconnected, reconnect_delay_minutes):
         now = time.monotonic()
@@ -837,12 +971,12 @@ class App(tk.Tk):
 
     @staticmethod
     def _selected_billing_values(regs, consumption):
-        billing = regs[29]
+        billing = regs[41]
         if billing == 0:
-            offsets = (22, 24, 26) if consumption else (13, 15, 17)
+            offsets = (24, 30, 36) if consumption else (13, 15, 17)
             unit = "kWh" if consumption else "per kWh"
         elif billing == 1:
-            offsets = (23, 25, 27) if consumption else (14, 16, 18)
+            offsets = (27, 33, 39) if consumption else (14, 16, 18)
             unit = "kVAh" if consumption else "per kVAh"
         else:
             return "Not available for this billing parameter"
@@ -909,13 +1043,13 @@ class App(tk.Tk):
 
     @staticmethod
     def _tamper_event_time(regs):
-        saved_time = App._saved_timestamp(regs, 46, 47)
+        saved_time = App._saved_timestamp(regs, 58, 59)
         if saved_time != "Not available":
             return saved_time
         try:
             return datetime.datetime(
-                regs[36], regs[37], regs[38], regs[39], regs[40],
-                regs[41]).strftime("%d/%m/%Y %H:%M:%S")
+                regs[48], regs[49], regs[50], regs[51], regs[52],
+                regs[53]).strftime("%d/%m/%Y %H:%M:%S")
         except ValueError:
             return datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
@@ -971,7 +1105,8 @@ class App(tk.Tk):
 
     def _rtc_diff_text(self, r):
         try:
-            dev = datetime.datetime(r[36], r[37], r[38], r[39], r[40], r[41])
+            dev = datetime.datetime(r[48], r[49], r[50], r[51], r[52],
+                                    r[53])
         except ValueError:
             return "   (RTC not valid)"
         diff = (dev - datetime.datetime.now()).total_seconds()
@@ -1003,7 +1138,7 @@ class App(tk.Tk):
             t = datetime.datetime.now()
             self.bus.write_multiple(sid, RTC_FIRST, [
                 t.year, t.month, t.day, t.hour, t.minute, t.second])
-            return t, self.bus.read_holding(sid, 0, CONTROLLER_REG_COUNT)
+            return t, self._read_controller_registers(sid)
 
         def ok(result):
             t, vals = result
@@ -1052,6 +1187,20 @@ class App(tk.Tk):
         if not self.cons_dirty:
             self.status("No consumption changes to write")
             return
+        selected_unit = {0: "kWh", 1: "kVAh"}.get(self.regs[41])
+        visible_offsets = {
+            new_off for unit, old_off, new_off, total_off in (
+                ("kWh", 22, 23, 24), ("kVAh", 25, 26, 27),
+                ("kWh", 28, 29, 30), ("kVAh", 31, 32, 33),
+                ("kWh", 34, 35, 36), ("kVAh", 37, 38, 39))
+            if unit == selected_unit
+        }
+        if selected_unit is None or self.cons_dirty - visible_offsets:
+            messagebox.showerror(
+                "Consumption selection changed",
+                "The billing selection changed while consumption edits were "
+                "pending. Reload consumption before writing.")
+            return
         writes = []
         try:
             sid = self.slave()
@@ -1061,14 +1210,15 @@ class App(tk.Tk):
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
-        names = {22: "Mains kWh", 23: "Mains kVAh", 24: "DG kWh",
-                 25: "DG kVAh", 26: "Solar kWh", 27: "Solar kVAh"}
+        names = {23: "Mains kWh", 26: "Mains kVAh", 29: "DG kWh",
+                 32: "DG kVAh", 35: "Solar kWh", 38: "Solar kVAh"}
         summary = "\n".join(f"{names[o]} ({40001 + o}):  "
                             f"{self.regs[o]}  ->  {v}" for o, v in writes)
         if not messagebox.askyesno(
                 "Write consumption",
-                summary + "\n\nThe board recalculates the balance from the "
-                "consumption totals and rates. Continue?"):
+                summary + "\n\nThe board treats these as new cumulative meter "
+                "readings, updates the totals, and recalculates the balance. "
+                "Continue?"):
             return
 
         def job():
@@ -1077,7 +1227,7 @@ class App(tk.Tk):
                     self.bus.write_single(sid, off, raw)
                 except ModbusError as exc:
                     raise ModbusError(f"Register {40001 + off}: {exc}")
-            return self.bus.read_holding(sid, 0, CONTROLLER_REG_COUNT)
+            return self._read_controller_registers(sid)
 
         def ok(vals):
             self.cons_dirty.clear()
@@ -1106,18 +1256,18 @@ class App(tk.Tk):
     def apply_recharge(self):
         try:
             n = int(self.recharge_var.get(), 0)
-            raw = parse_input(43, str(n))
+            raw = parse_input(55, str(n))
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
-        self.write_and_refresh(43, raw, f"Recharge adjustment {n} applied")
+        self.write_and_refresh(55, raw, f"Recharge adjustment {n} applied")
 
     def reset_balance(self):
         if messagebox.askyesno(
                 "Reset balance",
-                "Write 1 to 40063?\n\nThis resets the balance to zero "
+                "Write 1 to 40074?\n\nThis resets the balance to zero "
                 "while keeping cumulative consumption totals."):
-            self.write_and_refresh(62, 1, "Balance reset to zero")
+            self.write_and_refresh(73, 1, "Balance reset to zero")
 
     # ---- generic register write ----------------------------------------
     def write_and_refresh(self, offset, raw, message=None):
@@ -1131,7 +1281,7 @@ class App(tk.Tk):
             self._write_one(sid, offset, raw)
             # a new controller ID takes effect immediately
             read_sid = raw if offset == 3 else sid
-            return self.bus.read_holding(read_sid, 0, CONTROLLER_REG_COUNT)
+            return self._read_controller_registers(read_sid)
 
         def ok(values):
             self.regs = values
@@ -1166,6 +1316,15 @@ class App(tk.Tk):
             self.log("INFO", f"Slave ID set to {raw}")
 
     # ---- reading ---------------------------------------------------------
+    def _read_controller_registers(self, sid):
+        values = []
+        for start in range(0, CONTROLLER_REG_COUNT,
+                           MODBUS_MAX_READ_REGISTERS):
+            count = min(MODBUS_MAX_READ_REGISTERS,
+                        CONTROLLER_REG_COUNT - start)
+            values.extend(self.bus.read_holding(sid, start, count))
+        return values
+
     def read_all(self, quiet=False):
         try:
             sid = self.slave()
@@ -1176,7 +1335,7 @@ class App(tk.Tk):
         with_meter = self.poll_meter_var.get()
 
         def job():
-            vals = self.bus.read_holding(sid, 0, CONTROLLER_REG_COUNT)
+            vals = self._read_controller_registers(sid)
             meter = None
             if with_meter:
                 meter = self.bus.read_holding(sid, METER_BASE, METER_REG_COUNT)
@@ -1217,7 +1376,7 @@ class App(tk.Tk):
     # ---- registers tab -----------------------------------------------------
     def _build_registers(self):
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text="Registers 40001-40100")
+        self.nb.add(tab, text="Registers 40001-40151")
         bar = ttk.Frame(tab)
         bar.pack(fill="x", padx=8, pady=6)
         ttk.Button(bar, text="Read all", command=self.read_all).pack(
@@ -1460,9 +1619,9 @@ class App(tk.Tk):
             (15, "DG kWh rate"), (16, "DG kVAh rate"),
             (17, "Solar kWh rate"), (18, "Solar kVAh rate"),
             (19, "Low-balance threshold"), (21, "Backlight timeout (s)"),
-            (31, "Max load threshold"),
-            (32, "Overload delay (s; 0 = immediate)"),
-            (33, "Reconnect delay (min)")]
+            (43, "Max load threshold"),
+            (44, "Overload delay (s; 0 = immediate)"),
+            (45, "Reconnect delay (min)")]
         self.tl_vars = {}
         for n, (off, label) in enumerate(self.tl_fields):
             r, c = divmod(n, 2)
@@ -1477,12 +1636,12 @@ class App(tk.Tk):
         self.load_parameter_var = tk.StringVar()
         self.override_var = tk.StringVar()
         for k, (label, v, names, off) in enumerate((
-                ("Billing parameter (40030)", self.billing_var,
-                 BILLING_NAMES, 29),
-                ("Load parameter (40035)", self.load_parameter_var,
-                 LOAD_PARAMETER_NAMES, 34),
-                ("BMS relay override (40061)", self.override_var,
-                 OVERRIDE_NAMES, 60))):
+                ("Billing parameter (40042)", self.billing_var,
+                 BILLING_NAMES, 41),
+                ("Load parameter (40047)", self.load_parameter_var,
+                 LOAD_PARAMETER_NAMES, 46),
+                ("BMS relay override (40073)", self.override_var,
+                 OVERRIDE_NAMES, 72))):
             ttk.Label(tl, text=label).grid(row=r + k, column=0, sticky="e",
                                            padx=6, pady=3)
             ttk.Combobox(tl, textvariable=v, state="readonly", width=28,
@@ -1605,13 +1764,13 @@ class App(tk.Tk):
             self.regs, self.regs_valid = vals, True
             for off, v in self.tl_vars.items():
                 v.set(str(vals[off]))
-            self.billing_var.set(BILLING_NAMES.get(vals[29], ""))
-            self.load_parameter_var.set(LOAD_PARAMETER_NAMES.get(vals[34], ""))
-            self.override_var.set(OVERRIDE_NAMES.get(vals[60], ""))
+            self.billing_var.set(BILLING_NAMES.get(vals[41], ""))
+            self.load_parameter_var.set(LOAD_PARAMETER_NAMES.get(vals[46], ""))
+            self.override_var.set(OVERRIDE_NAMES.get(vals[72], ""))
             self.refresh_views()
             self.status("Settings read")
 
-        self.run(lambda: self.bus.read_holding(sid, 0, CONTROLLER_REG_COUNT), ok,
+        self.run(lambda: self._read_controller_registers(sid), ok,
                  self.on_error_box)
 
     def write_tariffs(self):
@@ -1621,10 +1780,10 @@ class App(tk.Tk):
             for off, v in self.tl_vars.items():
                 if v.get().strip() != "":
                     writes.append((off, parse_input(off, v.get())))
-            for off, var, names in ((29, self.billing_var, BILLING_NAMES),
-                                    (34, self.load_parameter_var,
+            for off, var, names in ((41, self.billing_var, BILLING_NAMES),
+                                    (46, self.load_parameter_var,
                                      LOAD_PARAMETER_NAMES),
-                                    (60, self.override_var, OVERRIDE_NAMES)):
+                                    (72, self.override_var, OVERRIDE_NAMES)):
                 if var.get():
                     writes.append((off, {n: k for k, n in names.items()}
                                    [var.get()]))
@@ -1640,7 +1799,7 @@ class App(tk.Tk):
                     self.bus.write_single(sid, off, raw)
                 except ModbusError as exc:
                     raise ModbusError(f"Register {40001 + off}: {exc}")
-            return self.bus.read_holding(sid, 0, CONTROLLER_REG_COUNT)
+            return self._read_controller_registers(sid)
 
         def ok(vals):
             self.regs, self.regs_valid = vals, True

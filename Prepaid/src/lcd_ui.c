@@ -268,6 +268,51 @@ static void LCD_UI_ShowTotalDeducted(void)
     LCD_UI_PadLine(1, used);
 }
 
+static void LCD_UI_ShowMeterDisconnect(void)
+{
+    RTC_DateTime timestamp;
+    uint8_t available;
+    uint8_t used;
+
+    available = RS485_GetMeterDisconnectTimestamp(&timestamp);
+    LCD_Command(0x0C); LCD_SetCursor(0, 0);
+    LCD_WriteText("Date:");
+    if (available)
+    {
+        LCD_UI_WriteTwoDigits(timestamp.day);
+        LCD_WriteChar('/');
+        LCD_UI_WriteTwoDigits(timestamp.month);
+        LCD_WriteChar('/');
+        LCD_UI_WriteUnsignedLong(timestamp.year);
+    }
+    else
+    {
+        LCD_WriteText("unavailable");
+        used = 16;
+    }
+    if (available)
+    {
+        used = 15;
+    }
+    LCD_UI_PadLine(0, used); LCD_SetCursor(1, 0);
+    if (available)
+    {
+        LCD_WriteText("Time:");
+        LCD_UI_WriteTwoDigits(timestamp.hours);
+        LCD_WriteChar(':');
+        LCD_UI_WriteTwoDigits(timestamp.minutes);
+        LCD_WriteChar(':');
+        LCD_UI_WriteTwoDigits(timestamp.seconds);
+        used = 13;
+    }
+    else
+    {
+        LCD_WriteText("Not available");
+        used = 13;
+    }
+    LCD_UI_PadLine(1, used);
+}
+
 void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
 {
     switch (screen_number)
@@ -298,6 +343,8 @@ void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
             LCD_UI_ShowLastRecharge(); break;
         case LCD_UI_SCREEN_17_TOTAL_DEDUCTED:
             LCD_UI_ShowTotalDeducted(); break;
+        case LCD_UI_SCREEN_18_METER_DISCONNECT:
+            LCD_UI_ShowMeterDisconnect(); break;
         default:
             LCD_UI_ShowConsumptionFlag(); break;
     }

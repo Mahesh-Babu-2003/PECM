@@ -26,6 +26,7 @@ typedef struct
 
 extern volatile RTC_DateTime rtc_datetime;
 extern volatile uint8_t rtc_datetime_valid;
+extern volatile uint8_t rtc_error;
 
 void I2C_Init(void);
 void I2C_TestInit(void);

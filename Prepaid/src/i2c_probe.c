@@ -12,6 +12,7 @@
 
 volatile RTC_DateTime rtc_datetime;
 volatile uint8_t rtc_datetime_valid;
+volatile uint8_t rtc_error;
 
 static uint8_t I2C_WaitComplete(void)
 {
@@ -381,9 +382,11 @@ uint8_t RTC_WriteDateTime(const RTC_DateTime *datetime)
 
     if (!I2C_WriteRegister(RTC_ADDR, 0x02, rtc_data, 7))
     {
+        rtc_error = 1;
         return 0;
     }
     rtc_datetime_valid = 1;
+    rtc_error = 0;
     return 1;
 }
 
@@ -401,6 +404,7 @@ uint8_t RTC_ReadDateTime(volatile RTC_DateTime *datetime)
     rtc_datetime_valid = 0;
     if (datetime == 0 || !I2C_ReadRegister(RTC_ADDR, 0x02, rtc_data, 7))
     {
+        rtc_error = 1;
         return 0;
     }
     if ((rtc_data[0] & 0x80) != 0 ||
@@ -411,11 +415,13 @@ uint8_t RTC_ReadDateTime(volatile RTC_DateTime *datetime)
         !I2C_BcdToBinary(rtc_data[5], 0x1F, 12, &month) ||
         !I2C_BcdToBinary(rtc_data[6], 0xFF, 99, &year))
     {
+        rtc_error = 1;
         return 0;
     }
     weekday = (uint8_t)(rtc_data[4] & 0x07);
     if (day == 0 || month == 0 || weekday > 6)
     {
+        rtc_error = 1;
         return 0;
     }
 
@@ -428,6 +434,7 @@ uint8_t RTC_ReadDateTime(volatile RTC_DateTime *datetime)
     datetime->minutes = minutes;
     datetime->seconds = seconds;
     rtc_datetime_valid = 1;
+    rtc_error = 0;
     return 1;
 }
 
