@@ -1,181 +1,517 @@
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/09/2026 16:51:50 PAGE 1   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE I2C_PROBE
-OBJECT MODULE PLACED IN C:\Users\Dinesh\.copilot\session-state\48682e31-b259-4d1f-8ab3-35f8af34aec9\files\modbus-check\i2c_probe.obj
+OBJECT MODULE PLACED IN C:\Users\Dinesh\.copilot\session-state\5d29eb83-8ab7-482d-ab93-36ec4d382fc4\files\port-build\i2c_probe.obj
 COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.exe src\i2c_probe.c INCDIR(src;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51
                     -EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51T
-                    -C0AE_MS51PC0AE\Library\StdDriver\inc) LARGE OBJECT(C:\Users\Dinesh\.copilot\session-state\48682e31-b259-4d1f-8ab3-35f8af
-                    -34aec9\files\modbus-check\i2c_probe.obj)
+                    -C0AE_MS51PC0AE\Library\StdDriver\inc) LARGE OPTIMIZE(7,SIZE) OBJECTEXTEND OBJECT(C:\Users\Dinesh\.copilot\session-state\
+                    -5d29eb83-8ab7-482d-ab93-36ec4d382fc4\files\port-build\i2c_probe.obj)
 
 line level    source
 
    1          #include "i2c_probe.h"
-   2          
-   3          #define I2C_SI       0x08
-   4          #define I2C_STO      0x10
-   5          #define I2C_STA      0x20
-   6          #define I2C_ENABLE   0x40
-   7          #define EEPROM_ADDR  0x50
-   8          #define RTC_ADDR     0x51
-   9          
-  10          static uint8_t I2C_WaitComplete(void)
-  11          {
-  12   1          uint16_t timeout;
-  13   1      
-  14   1          timeout = 0;
-  15   1          while ((I2CON & I2C_SI) == 0)
-  16   1          {
-  17   2              timeout++;
-  18   2              if (timeout == 0) return 0;
-  19   2          }
-  20   1          return 1;
-  21   1      }
-  22          
-  23          static uint8_t I2C_Start(void)
-  24          {
-  25   1          SFRS = 0;
-  26   1          I2CON |= I2C_STA;
-  27   1          I2CON &= (uint8_t)~I2C_SI;
-  28   1          if (!I2C_WaitComplete()) return 0;
-  29   1          if (I2STAT != 0x08 && I2STAT != 0x10) return 0;
-  30   1          I2CON &= (uint8_t)~I2C_STA;
-  31   1          return 1;
-  32   1      }
-  33          
-  34          static uint8_t I2C_Write(uint8_t value, uint8_t expected_status)
-  35          {
-  36   1          I2DAT = value;
-  37   1          I2CON &= (uint8_t)~I2C_SI;
-  38   1          if (!I2C_WaitComplete()) return 0;
-  39   1          return (I2STAT == expected_status);
-  40   1      }
-  41          
-  42          static uint8_t I2C_Read(uint8_t acknowledge, uint8_t *value)
-  43          {
-  44   1          if (acknowledge) I2CON |= 0x04;
-  45   1          else I2CON &= (uint8_t)~0x04;
-  46   1      
-  47   1          I2CON &= (uint8_t)~I2C_SI;
-  48   1          if (!I2C_WaitComplete()) return 0;
-  49   1          if (acknowledge && I2STAT != 0x50) return 0;
-  50   1          if (!acknowledge && I2STAT != 0x58) return 0;
-  51   1          *value = I2DAT;
-  52   1          return 1;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/09/2026 16:51:50 PAGE 2   
+   2          #include "board_io.h"
+   3          
+   4          #define I2C_SI       0x08
+   5          #define I2C_STO      0x10
+   6          #define I2C_STA      0x20
+   7          #define I2C_ENABLE   0x40
+   8          #define EEPROM_ADDR  0x50
+   9          #define RTC_ADDR     0x51
+  10          #define RTC_EEPROM_OFFSET 0x0040
+  11          #define RTC_EEPROM_RECORD_SIZE 13
+  12          
+  13          volatile RTC_DateTime rtc_datetime;
+  14          volatile uint8_t rtc_datetime_valid;
+  15          volatile uint8_t rtc_error;
+  16          
+  17          static uint8_t I2C_WaitComplete(void)
+  18          {
+  19   1          uint16_t timeout;
+  20   1      
+  21   1          timeout = 0;
+  22   1          while ((I2CON & I2C_SI) == 0)
+  23   1          {
+  24   2              timeout++;
+  25   2              if (timeout == 0) return 0;
+  26   2          }
+  27   1          return 1;
+  28   1      }
+  29          
+  30          static uint8_t I2C_Start(void)
+  31          {
+  32   1          SFRS = 0;
+  33   1          I2CON |= I2C_STA;
+  34   1          I2CON &= (uint8_t)~I2C_SI;
+  35   1          if (!I2C_WaitComplete()) return 0;
+  36   1          if (I2STAT != 0x08 && I2STAT != 0x10) return 0;
+  37   1          I2CON &= (uint8_t)~I2C_STA;
+  38   1          return 1;
+  39   1      }
+  40          
+  41          static uint8_t I2C_Write(uint8_t value, uint8_t expected_status)
+  42          {
+  43   1          I2DAT = value;
+  44   1          I2CON &= (uint8_t)~I2C_SI;
+  45   1          if (!I2C_WaitComplete()) return 0;
+  46   1          return (I2STAT == expected_status);
+  47   1      }
+  48          
+  49          static uint8_t I2C_Read(uint8_t acknowledge, uint8_t *value)
+  50          {
+  51   1          if (acknowledge) I2CON |= 0x04;
+  52   1          else I2CON &= (uint8_t)~0x04;
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 2   
 
-  53   1      }
-  54          
-  55          static uint8_t I2C_Stop(void)
-  56          {
-  57   1          uint16_t timeout;
-  58   1      
-  59   1          SFRS = 0;
-  60   1          I2CON |= I2C_STO;
-  61   1          I2CON &= (uint8_t)~I2C_SI;
-  62   1          timeout = 0;
-  63   1          while (I2CON & I2C_STO)
-  64   1          {
-  65   2              timeout++;
-  66   2              if (timeout == 0) return 0;
-  67   2          }
-  68   1          return 1;
-  69   1      }
-  70          
-  71          static uint8_t I2C_Probe(uint8_t address)
-  72          {
-  73   1          uint8_t acknowledged;
-  74   1      
-  75   1          acknowledged = 0;
-  76   1          if (I2C_Start())
-  77   1          {
-  78   2              acknowledged = I2C_Write((uint8_t)(address << 1), 0x18);
-  79   2          }
-  80   1          return (uint8_t)(I2C_Stop() && acknowledged);
-  81   1      }
-  82          
-  83          static uint8_t I2C_ReadRegister(uint8_t address, uint8_t register_address,
-  84                                          uint8_t *buffer, uint8_t length)
-  85          {
-  86   1          uint8_t index;
-  87   1      
-  88   1          if (length == 0) return 0;
-  89   1          if (!I2C_Start()) goto read_error;
-  90   1          if (!I2C_Write((uint8_t)(address << 1), 0x18)) goto read_error;
-  91   1          if (!I2C_Write(register_address, 0x28)) goto read_error;
-  92   1          if (!I2C_Start()) goto read_error;
-  93   1          if (!I2C_Write((uint8_t)((address << 1) | 1), 0x40)) goto read_error;
+  53   1      
+  54   1          I2CON &= (uint8_t)~I2C_SI;
+  55   1          if (!I2C_WaitComplete()) return 0;
+  56   1          if (acknowledge && I2STAT != 0x50) return 0;
+  57   1          if (!acknowledge && I2STAT != 0x58) return 0;
+  58   1          *value = I2DAT;
+  59   1          return 1;
+  60   1      }
+  61          
+  62          static uint8_t I2C_Stop(void)
+  63          {
+  64   1          uint16_t timeout;
+  65   1      
+  66   1          SFRS = 0;
+  67   1          I2CON |= I2C_STO;
+  68   1          I2CON &= (uint8_t)~I2C_SI;
+  69   1          timeout = 0;
+  70   1          while (I2CON & I2C_STO)
+  71   1          {
+  72   2              timeout++;
+  73   2              if (timeout == 0) return 0;
+  74   2          }
+  75   1          return 1;
+  76   1      }
+  77          
+  78          static uint8_t I2C_Probe(uint8_t address)
+  79          {
+  80   1          uint8_t acknowledged;
+  81   1      
+  82   1          acknowledged = 0;
+  83   1          if (I2C_Start())
+  84   1          {
+  85   2              acknowledged = I2C_Write((uint8_t)(address << 1), 0x18);
+  86   2          }
+  87   1          return (uint8_t)(I2C_Stop() && acknowledged);
+  88   1      }
+  89          
+  90          static uint8_t I2C_ReadRegister(uint8_t address, uint8_t register_address,
+  91                                          uint8_t *buffer, uint8_t length)
+  92          {
+  93   1          uint8_t index;
   94   1      
-  95   1          for (index = 0; index < length; index++)
-  96   1          {
-  97   2              if (!I2C_Read(index + 1 < length, &buffer[index])) goto read_error;
-  98   2          }
-  99   1          return I2C_Stop();
- 100   1      
- 101   1      read_error:
- 102   1          I2C_Stop();
- 103   1          return 0;
- 104   1      }
- 105          
- 106          static uint8_t I2C_ReadEEPROMByte(uint8_t *value)
- 107          {
- 108   1          if (!I2C_Start()) goto eeprom_error;
- 109   1          if (!I2C_Write((uint8_t)(EEPROM_ADDR << 1), 0x18)) goto eeprom_error;
- 110   1          if (!I2C_Write(0x00, 0x28)) goto eeprom_error;
- 111   1          if (!I2C_Write(0x00, 0x28)) goto eeprom_error;
- 112   1          if (!I2C_Start()) goto eeprom_error;
- 113   1          if (!I2C_Write((uint8_t)((EEPROM_ADDR << 1) | 1), 0x40)) goto eeprom_error;
- 114   1          if (!I2C_Read(0, value)) goto eeprom_error;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         10/09/2026 16:51:50 PAGE 3   
+  95   1          if (length == 0) return 0;
+  96   1          if (!I2C_Start()) goto read_error;
+  97   1          if (!I2C_Write((uint8_t)(address << 1), 0x18)) goto read_error;
+  98   1          if (!I2C_Write(register_address, 0x28)) goto read_error;
+  99   1          if (!I2C_Start()) goto read_error;
+ 100   1          if (!I2C_Write((uint8_t)((address << 1) | 1), 0x40)) goto read_error;
+ 101   1      
+ 102   1          for (index = 0; index < length; index++)
+ 103   1          {
+ 104   2              if (!I2C_Read(index + 1 < length, &buffer[index])) goto read_error;
+ 105   2          }
+ 106   1          return I2C_Stop();
+ 107   1      
+ 108   1      read_error:
+ 109   1          I2C_Stop();
+ 110   1          return 0;
+ 111   1      }
+ 112          
+ 113          static uint8_t I2C_WriteRegister(uint8_t address, uint8_t register_address,
+ 114                                           const uint8_t *buffer, uint8_t length)
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 3   
 
- 115   1          return I2C_Stop();
- 116   1      
- 117   1      eeprom_error:
- 118   1          I2C_Stop();
- 119   1          return 0;
- 120   1      }
- 121          
- 122          void I2C_TestInit(void)
- 123          {
- 124   1          SFRS = 0;
- 125   1          P13_OPENDRAIN_MODE;
- 126   1          P14_OPENDRAIN_MODE;
- 127   1          P1 |= 0x18;
- 128   1          I2CLK = 59;
- 129   1          I2CON = I2C_ENABLE;
- 130   1      }
- 131          
- 132          void I2C_RunReadOnlyTests(I2C_TestResult *result)
- 133          {
- 134   1          uint8_t rtc_data[7];
- 135   1      
- 136   1          result->eeprom_present = I2C_Probe(EEPROM_ADDR);
- 137   1          result->rtc_present = I2C_Probe(RTC_ADDR);
- 138   1          result->eeprom_read_ok = 0;
- 139   1          result->rtc_read_ok = 0;
- 140   1          result->eeprom_first_byte = 0;
- 141   1          result->rtc_seconds = 0;
- 142   1      
- 143   1          if (result->eeprom_present &&
- 144   1              I2C_ReadEEPROMByte(&result->eeprom_first_byte))
- 145   1          {
- 146   2              result->eeprom_read_ok = 1;
- 147   2          }
- 148   1      
- 149   1          if (result->rtc_present && I2C_ReadRegister(RTC_ADDR, 0x02, rtc_data, 7))
- 150   1          {
- 151   2              result->rtc_seconds = (uint8_t)(rtc_data[0] & 0x7F);
- 152   2              result->rtc_read_ok = 1;
- 153   2          }
- 154   1      }
+ 115          {
+ 116   1          uint8_t index;
+ 117   1      
+ 118   1          if (length == 0) return 0;
+ 119   1          if (!I2C_Start()) goto write_error;
+ 120   1          if (!I2C_Write((uint8_t)(address << 1), 0x18)) goto write_error;
+ 121   1          if (!I2C_Write(register_address, 0x28)) goto write_error;
+ 122   1          for (index = 0; index < length; index++)
+ 123   1          {
+ 124   2              if (!I2C_Write(buffer[index], 0x28)) goto write_error;
+ 125   2          }
+ 126   1          return I2C_Stop();
+ 127   1      
+ 128   1      write_error:
+ 129   1          I2C_Stop();
+ 130   1          return 0;
+ 131   1      }
+ 132          
+ 133          static uint8_t I2C_ReadEEPROMByte(uint8_t *value)
+ 134          {
+ 135   1          if (!I2C_Start()) goto eeprom_error;
+ 136   1          if (!I2C_Write((uint8_t)(EEPROM_ADDR << 1), 0x18)) goto eeprom_error;
+ 137   1          if (!I2C_Write(0x00, 0x28)) goto eeprom_error;
+ 138   1          if (!I2C_Write(0x00, 0x28)) goto eeprom_error;
+ 139   1          if (!I2C_Start()) goto eeprom_error;
+ 140   1          if (!I2C_Write((uint8_t)((EEPROM_ADDR << 1) | 1), 0x40)) goto eeprom_error;
+ 141   1          if (!I2C_Read(0, value)) goto eeprom_error;
+ 142   1          return I2C_Stop();
+ 143   1      
+ 144   1      eeprom_error:
+ 145   1          I2C_Stop();
+ 146   1          return 0;
+ 147   1      }
+ 148          
+ 149          static uint8_t I2C_ReadEEPROM(uint16_t address, uint8_t *buffer,
+ 150                                        uint8_t length)
+ 151          {
+ 152   1          uint8_t index;
+ 153   1      
+ 154   1          if (length == 0 || (uint32_t)address + length > 8192UL) return 0;
+ 155   1          if (!I2C_Start()) goto eeprom_read_error;
+ 156   1          if (!I2C_Write((uint8_t)(EEPROM_ADDR << 1), 0x18)) goto eeprom_read_error;
+ 157   1          if (!I2C_Write((uint8_t)(address >> 8), 0x28)) goto eeprom_read_error;
+ 158   1          if (!I2C_Write((uint8_t)address, 0x28)) goto eeprom_read_error;
+ 159   1          if (!I2C_Start()) goto eeprom_read_error;
+ 160   1          if (!I2C_Write((uint8_t)((EEPROM_ADDR << 1) | 1), 0x40))
+ 161   1              goto eeprom_read_error;
+ 162   1          for (index = 0; index < length; index++)
+ 163   1          {
+ 164   2              if (!I2C_Read(index + 1 < length, &buffer[index]))
+ 165   2                  goto eeprom_read_error;
+ 166   2          }
+ 167   1          return I2C_Stop();
+ 168   1      
+ 169   1      eeprom_read_error:
+ 170   1          I2C_Stop();
+ 171   1          return 0;
+ 172   1      }
+ 173          
+ 174          static uint8_t I2C_WriteEEPROM(uint16_t address, const uint8_t *buffer,
+ 175                                         uint8_t length)
+ 176          {
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 4   
+
+ 177   1          uint8_t index;
+ 178   1      
+ 179   1          if (length == 0 || (uint32_t)address + length > 8192UL ||
+ 180   1              (address / 32) != ((address + length - 1) / 32))
+ 181   1          {
+ 182   2              return 0;
+ 183   2          }
+ 184   1          if (!I2C_Start()) goto eeprom_write_error;
+ 185   1          if (!I2C_Write((uint8_t)(EEPROM_ADDR << 1), 0x18))
+ 186   1              goto eeprom_write_error;
+ 187   1          if (!I2C_Write((uint8_t)(address >> 8), 0x28))
+ 188   1              goto eeprom_write_error;
+ 189   1          if (!I2C_Write((uint8_t)address, 0x28))
+ 190   1              goto eeprom_write_error;
+ 191   1          for (index = 0; index < length; index++)
+ 192   1          {
+ 193   2              if (!I2C_Write(buffer[index], 0x28)) goto eeprom_write_error;
+ 194   2          }
+ 195   1          if (!I2C_Stop()) return 0;
+ 196   1          Board_DelayMs(5);
+ 197   1          return 1;
+ 198   1      
+ 199   1      eeprom_write_error:
+ 200   1          I2C_Stop();
+ 201   1          return 0;
+ 202   1      }
+ 203          
+ 204          static uint16_t RTC_EEPROM_Crc16(const uint8_t *buffer, uint8_t length)
+ 205          {
+ 206   1          uint16_t crc;
+ 207   1          uint8_t index;
+ 208   1          uint8_t bit_index;
+ 209   1      
+ 210   1          crc = 0xFFFF;
+ 211   1          for (index = 0; index < length; index++)
+ 212   1          {
+ 213   2              crc ^= buffer[index];
+ 214   2              for (bit_index = 0; bit_index < 8; bit_index++)
+ 215   2              {
+ 216   3                  if (crc & 1)
+ 217   3                  {
+ 218   4                      crc = (uint16_t)((crc >> 1) ^ 0xA001);
+ 219   4                  }
+ 220   3                  else
+ 221   3                  {
+ 222   4                      crc >>= 1;
+ 223   4                  }
+ 224   3              }
+ 225   2          }
+ 226   1          return crc;
+ 227   1      }
+ 228          
+ 229          static uint8_t I2C_BcdToBinary(uint8_t value, uint8_t mask, uint8_t maximum,
+ 230                                         uint8_t *result)
+ 231          {
+ 232   1          uint8_t tens;
+ 233   1          uint8_t units;
+ 234   1          uint8_t decoded;
+ 235   1      
+ 236   1          value &= mask;
+ 237   1          tens = (uint8_t)((value >> 4) & 0x0F);
+ 238   1          units = (uint8_t)(value & 0x0F);
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 5   
+
+ 239   1          if (tens > 9 || units > 9)
+ 240   1          {
+ 241   2              return 0;
+ 242   2          }
+ 243   1          decoded = (uint8_t)((tens * 10) + units);
+ 244   1          if (decoded > maximum)
+ 245   1          {
+ 246   2              return 0;
+ 247   2          }
+ 248   1          *result = decoded;
+ 249   1          return 1;
+ 250   1      }
+ 251          
+ 252          static uint8_t RTC_BinaryToBcd(uint8_t value)
+ 253          {
+ 254   1          return (uint8_t)(((value / 10) << 4) | (value % 10));
+ 255   1      }
+ 256          
+ 257          static uint8_t RTC_IsLeapYear(uint16_t year)
+ 258          {
+ 259   1          return (uint8_t)(((year % 4) == 0) &&
+ 260   1              (((year % 100) != 0) || ((year % 400) == 0)));
+ 261   1      }
+ 262          
+ 263          static uint8_t RTC_DaysInMonth(uint16_t year, uint8_t month)
+ 264          {
+ 265   1          switch (month)
+ 266   1          {
+ 267   2              case 2:
+ 268   2                  return RTC_IsLeapYear(year) ? 29 : 28;
+ 269   2              case 4:
+ 270   2              case 6:
+ 271   2              case 9:
+ 272   2              case 11:
+ 273   2                  return 30;
+ 274   2              default:
+ 275   2                  return 31;
+ 276   2          }
+ 277   1      }
+ 278          
+ 279          static uint8_t RTC_DateTimeIsValid(const RTC_DateTime *datetime)
+ 280          {
+ 281   1          if (datetime == 0 || datetime->year < 2000 || datetime->year > 2199 ||
+ 282   1              datetime->month < 1 || datetime->month > 12 || datetime->day < 1 ||
+ 283   1              datetime->day > RTC_DaysInMonth(datetime->year, datetime->month) ||
+ 284   1              datetime->weekday > 6 || datetime->hours > 23 ||
+ 285   1              datetime->minutes > 59 || datetime->seconds > 59)
+ 286   1          {
+ 287   2              return 0;
+ 288   2          }
+ 289   1          return 1;
+ 290   1      }
+ 291          
+ 292          uint8_t RTC_SaveDateTimeToEEPROM(const RTC_DateTime *datetime)
+ 293          {
+ 294   1          uint8_t record[RTC_EEPROM_RECORD_SIZE];
+ 295   1          uint16_t crc;
+ 296   1          uint8_t verify[RTC_EEPROM_RECORD_SIZE];
+ 297   1          uint8_t index;
+ 298   1      
+ 299   1          if (!RTC_DateTimeIsValid(datetime)) return 0;
+ 300   1      
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 6   
+
+ 301   1          record[0] = 0x52;
+ 302   1          record[1] = 0x54;
+ 303   1          record[2] = 0x01;
+ 304   1          record[3] = (uint8_t)(datetime->year >> 8);
+ 305   1          record[4] = (uint8_t)datetime->year;
+ 306   1          record[5] = datetime->month;
+ 307   1          record[6] = datetime->day;
+ 308   1          record[7] = datetime->weekday;
+ 309   1          record[8] = datetime->hours;
+ 310   1          record[9] = datetime->minutes;
+ 311   1          record[10] = datetime->seconds;
+ 312   1          crc = RTC_EEPROM_Crc16(record, 11);
+ 313   1          record[11] = (uint8_t)crc;
+ 314   1          record[12] = (uint8_t)(crc >> 8);
+ 315   1      
+ 316   1          if (!I2C_WriteEEPROM(RTC_EEPROM_OFFSET, record,
+ 317   1                               RTC_EEPROM_RECORD_SIZE) ||
+ 318   1              !I2C_ReadEEPROM(RTC_EEPROM_OFFSET, verify,
+ 319   1                              RTC_EEPROM_RECORD_SIZE))
+ 320   1          {
+ 321   2              return 0;
+ 322   2          }
+ 323   1          for (index = 0; index < RTC_EEPROM_RECORD_SIZE; index++)
+ 324   1          {
+ 325   2              if (record[index] != verify[index]) return 0;
+ 326   2          }
+ 327   1          return 1;
+ 328   1      }
+ 329          
+ 330          uint8_t RTC_LoadDateTimeFromEEPROM(RTC_DateTime *datetime)
+ 331          {
+ 332   1          uint8_t record[RTC_EEPROM_RECORD_SIZE];
+ 333   1          uint16_t stored_crc;
+ 334   1          uint16_t calculated_crc;
+ 335   1          RTC_DateTime candidate;
+ 336   1      
+ 337   1          if (datetime == 0 ||
+ 338   1              !I2C_ReadEEPROM(RTC_EEPROM_OFFSET, record,
+ 339   1                              RTC_EEPROM_RECORD_SIZE))
+ 340   1          {
+ 341   2              return 0;
+ 342   2          }
+ 343   1          if (record[0] != 0x52 || record[1] != 0x54 || record[2] != 0x01)
+ 344   1          {
+ 345   2              return 0;
+ 346   2          }
+ 347   1      
+ 348   1          stored_crc = (uint16_t)(record[11] | ((uint16_t)record[12] << 8));
+ 349   1          calculated_crc = RTC_EEPROM_Crc16(record, 11);
+ 350   1          if (stored_crc != calculated_crc) return 0;
+ 351   1      
+ 352   1          candidate.year = (uint16_t)(((uint16_t)record[3] << 8) | record[4]);
+ 353   1          candidate.month = record[5];
+ 354   1          candidate.day = record[6];
+ 355   1          candidate.weekday = record[7];
+ 356   1          candidate.hours = record[8];
+ 357   1          candidate.minutes = record[9];
+ 358   1          candidate.seconds = record[10];
+ 359   1          if (!RTC_DateTimeIsValid(&candidate)) return 0;
+ 360   1      
+ 361   1          *datetime = candidate;
+ 362   1          return 1;
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 7   
+
+ 363   1      }
+ 364          
+ 365          uint8_t RTC_WriteDateTime(const RTC_DateTime *datetime)
+ 366          {
+ 367   1          uint8_t rtc_data[7];
+ 368   1      
+ 369   1          if (!RTC_DateTimeIsValid(datetime)) return 0;
+ 370   1      
+ 371   1          rtc_data[0] = RTC_BinaryToBcd(datetime->seconds);
+ 372   1          rtc_data[1] = RTC_BinaryToBcd(datetime->minutes);
+ 373   1          rtc_data[2] = RTC_BinaryToBcd(datetime->hours);
+ 374   1          rtc_data[3] = RTC_BinaryToBcd(datetime->day);
+ 375   1          rtc_data[4] = (uint8_t)(datetime->weekday & 0x07);
+ 376   1          rtc_data[5] = RTC_BinaryToBcd(datetime->month);
+ 377   1          if (datetime->year >= 2100)
+ 378   1          {
+ 379   2              rtc_data[5] |= 0x80;
+ 380   2          }
+ 381   1          rtc_data[6] = RTC_BinaryToBcd((uint8_t)(datetime->year % 100));
+ 382   1      
+ 383   1          if (!I2C_WriteRegister(RTC_ADDR, 0x02, rtc_data, 7))
+ 384   1          {
+ 385   2              rtc_error = 1;
+ 386   2              return 0;
+ 387   2          }
+ 388   1          rtc_datetime_valid = 1;
+ 389   1          rtc_error = 0;
+ 390   1          return 1;
+ 391   1      }
+ 392          
+ 393          uint8_t RTC_ReadDateTime(volatile RTC_DateTime *datetime)
+ 394          {
+ 395   1          uint8_t rtc_data[7];
+ 396   1          uint8_t year;
+ 397   1          uint8_t month;
+ 398   1          uint8_t day;
+ 399   1          uint8_t weekday;
+ 400   1          uint8_t hours;
+ 401   1          uint8_t minutes;
+ 402   1          uint8_t seconds;
+ 403   1      
+ 404   1          rtc_datetime_valid = 0;
+ 405   1          if (datetime == 0 || !I2C_ReadRegister(RTC_ADDR, 0x02, rtc_data, 7))
+ 406   1          {
+ 407   2              rtc_error = 1;
+ 408   2              return 0;
+ 409   2          }
+ 410   1          if ((rtc_data[0] & 0x80) != 0 ||
+ 411   1              !I2C_BcdToBinary(rtc_data[0], 0x7F, 59, &seconds) ||
+ 412   1              !I2C_BcdToBinary(rtc_data[1], 0x7F, 59, &minutes) ||
+ 413   1              !I2C_BcdToBinary(rtc_data[2], 0x3F, 23, &hours) ||
+ 414   1              !I2C_BcdToBinary(rtc_data[3], 0x3F, 31, &day) ||
+ 415   1              !I2C_BcdToBinary(rtc_data[5], 0x1F, 12, &month) ||
+ 416   1              !I2C_BcdToBinary(rtc_data[6], 0xFF, 99, &year))
+ 417   1          {
+ 418   2              rtc_error = 1;
+ 419   2              return 0;
+ 420   2          }
+ 421   1          weekday = (uint8_t)(rtc_data[4] & 0x07);
+ 422   1          if (day == 0 || month == 0 || weekday > 6)
+ 423   1          {
+ 424   2              rtc_error = 1;
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 8   
+
+ 425   2              return 0;
+ 426   2          }
+ 427   1      
+ 428   1          datetime->year = (uint16_t)(2000 + year +
+ 429   1              ((rtc_data[5] & 0x80) ? 100 : 0));
+ 430   1          datetime->month = month;
+ 431   1          datetime->day = day;
+ 432   1          datetime->weekday = weekday;
+ 433   1          datetime->hours = hours;
+ 434   1          datetime->minutes = minutes;
+ 435   1          datetime->seconds = seconds;
+ 436   1          rtc_datetime_valid = 1;
+ 437   1          rtc_error = 0;
+ 438   1          return 1;
+ 439   1      }
+ 440          
+ 441          void I2C_Init(void)
+ 442          {
+ 443   1          SFRS = 0;
+ 444   1          P13_OPENDRAIN_MODE;
+ 445   1          P14_OPENDRAIN_MODE;
+ 446   1          P1 |= 0x18;
+ 447   1          I2CLK = 59;
+ 448   1          I2CON = I2C_ENABLE;
+ 449   1      }
+ 450          
+ 451          void I2C_TestInit(void)
+ 452          {
+ 453   1          I2C_Init();
+ 454   1      }
+ 455          
+ 456          void I2C_RunReadOnlyTests(I2C_TestResult *result)
+ 457          {
+ 458   1          RTC_DateTime rtc_time;
+ 459   1      
+ 460   1          result->eeprom_present = I2C_Probe(EEPROM_ADDR);
+ 461   1          result->rtc_present = I2C_Probe(RTC_ADDR);
+ 462   1          result->eeprom_read_ok = 0;
+ 463   1          result->rtc_read_ok = 0;
+ 464   1          result->eeprom_first_byte = 0;
+ 465   1          result->rtc_seconds = 0;
+ 466   1      
+ 467   1          if (result->eeprom_present &&
+ 468   1              I2C_ReadEEPROMByte(&result->eeprom_first_byte))
+ 469   1          {
+ 470   2              result->eeprom_read_ok = 1;
+ 471   2          }
+ 472   1      
+ 473   1          if (result->rtc_present && RTC_ReadDateTime(&rtc_time))
+ 474   1          {
+ 475   2              result->rtc_seconds = rtc_time.seconds;
+ 476   2              result->rtc_read_ok = 1;
+ 477   2          }
+ 478   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =    675    ----
+   CODE SIZE        =   2680    ----
    CONSTANT SIZE    =   ----    ----
-   XDATA SIZE       =   ----      17
+   XDATA SIZE       =     10     135
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/04/2026 13:24:59 PAGE 9   
+
    IDATA SIZE       =   ----    ----
    BIT SIZE         =   ----    ----
 END OF MODULE INFORMATION.

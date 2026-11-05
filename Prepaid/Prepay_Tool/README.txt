@@ -12,10 +12,26 @@ WHAT IS IN THIS ZIP
       rtc_sync.patch         the same change as a patch
       src\rs485_test.c, src\main.c   the two edited source files
 
-The dashboard keeps the latest five tamper events in a dropdown. Its history
-is saved on this PC at %LOCALAPPDATA%\PrepayTool\tamper_events.json. If the
-tool first connects when the device counter is already above zero, it shows
-that many prior event numbers; their earlier timestamps are marked unavailable.
+The dashboard lists the latest five tamper events recorded by this tool
+(newest first). Its history is saved on this PC at
+%LOCALAPPDATA%\PrepayTool\tamper_events.json. If the tool first connects when
+the device counter is already above zero, it shows that many prior event
+numbers; their earlier timestamps are marked unavailable.
+Register 40041 already clears the tamper count; the board requires SW4 to be
+secure before accepting the clear command. A successful clear also resets the
+tool's saved event history. No additional register is needed.
+When an error is shown on the board, press SW3 five times
+to clear the relay, RTC, EEPROM, and meter-communication error indicators.
+An active fault can be reported again after the next device check.
+The tool's Connect command can manually connect the loads at zero or negative
+balance, except while the board's overload reconnect delay is active. The
+overload countdown is displayed only for an overload trip; ordinary manual or
+balance disconnects do not show that timer. Register 40086 reports whether
+the overload reconnect delay is active.
+Manual Disconnect latches the loads off. A later recharge or consumption/balance
+change does not reconnect them; use Connect to turn them on again. Register
+40073 supports 0 = automatic balance control, 1 = force connected, and
+2 = force disconnected.
 
 
 WHAT TO INSTALL ON THE OTHER PC
@@ -46,10 +62,19 @@ D) To rebuild / flash the FIRMWARE (only if you change the board code)
      - Keil uVision with the C51 toolchain
      - Nuvoton MS51 device support (the project targets MS51PC0AE)
      - Nu-Link driver (the project is set up for a Nu-Link programmer)
-     Open firmware\Prepaid_RTC_sync.zip -> Prepaid_Interface_Test.uvproj,
-     Rebuild all, then flash. This adds the "Sync RTC" support on the board.
+     Open the workspace's Prepaid_Interface_Test.uvproj, rebuild all, then
+     flash. This uses the current sources in ..\src, including the latest
+     relay-balance and five-press error-reset behavior. The bundled
+     firmware\Prepaid_RTC_sync.zip is an older RTC-sync snapshot and does not
+     contain those later changes.
+     The board RTC keeps time while powered off only if its backup supply is
+     present. The firmware also saves the synchronized time in EEPROM as a
+     recovery snapshot, but EEPROM cannot count elapsed time while power is off.
 
 
 CONNECTION SETTINGS (board defaults)
      RS485 port 1, Slave ID 1, 9600 baud, 8 data bits, Even parity, 1 stop bit.
      Connect adapter A/B to RS485_A_1 / RS485_B_1. If there is no reply, swap A/B.
+     The status indicator shows CONNECTED only after a valid board response.
+     If the COM port is open but the board does not reply, it shows
+     NOT COMMUNICATING; the button remains Disconnect until the port is closed.

@@ -313,6 +313,57 @@ static void LCD_UI_ShowMeterDisconnect(void)
     LCD_UI_PadLine(1, used);
 }
 
+void LCD_UI_ShowPortSettings(uint8_t screen_number)
+{
+    uint32_t baud_rate;
+    uint8_t parity;
+    uint8_t slave_id;
+    uint8_t port;
+    uint8_t settings_offset;
+    uint8_t used;
+
+    if (screen_number < 1 || screen_number > LCD_UI_PORT_SETTINGS_SCREEN_COUNT)
+        return;
+
+    port = screen_number;
+    settings_offset = (port == 1) ? SLAVE_PORT1_BAUD_OFFSET :
+        SLAVE_PORT2_BAUD_OFFSET;
+    baud_rate = slave_holding_registers[settings_offset];
+    parity = (uint8_t)slave_holding_registers[settings_offset + 1];
+    slave_id = (uint8_t)slave_holding_registers[settings_offset + 2];
+    if (baud_rate == 65535UL) baud_rate = 115200UL;
+
+    LCD_Command(0x0C);
+    LCD_SetCursor(0, 0);
+    LCD_WriteText((port == 1) ? "OUT Bd: " : "IN Bd: ");
+    used = (uint8_t)((port == 1 ? 8 : 7) +
+        LCD_UI_WriteUnsignedLong(baud_rate));
+    LCD_UI_PadLine(0, used);
+    LCD_SetCursor(1, 0);
+    LCD_WriteText("P:");
+    used = 2;
+    if (parity == 0) { LCD_WriteText("None"); used += 4; }
+    else if (parity == 1) { LCD_WriteText("Even"); used += 4; }
+    else { LCD_WriteText("Odd"); used += 3; }
+    LCD_WriteText(" ID:");
+    used = (uint8_t)(used + 4 + LCD_UI_WriteUnsignedLong(slave_id));
+    LCD_UI_PadLine(1, used);
+}
+
+void LCD_UI_ShowError(uint8_t error_number)
+{
+    if (error_number < 1 || error_number > 4) return;
+
+    LCD_Command(0x0C);
+    LCD_SetCursor(0, 0);
+    LCD_WriteText("                ");
+    LCD_SetCursor(1, 0);
+    LCD_WriteText("                ");
+    LCD_SetCursor(0, 6);
+    LCD_WriteText("ER0");
+    LCD_WriteChar((char)('0' + error_number));
+}
+
 void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
 {
     switch (screen_number)

@@ -33,10 +33,13 @@ extern volatile uint8_t back_light_on;
 #define LCD_UI_SCREEN_18_METER_DISCONNECT  18
 #define LCD_UI_SCREEN_COUNT                18
 #define LCD_UI_SCREEN_RTC_EDIT             0
+#define LCD_UI_PORT_SETTINGS_SCREEN_COUNT  2
 
 void LCD_UI_Init(void);
 void LCD_UI_ApplyBacklight(void);
 void LCD_UI_ShowCustomerScreen(uint8_t screen_number);
+void LCD_UI_ShowPortSettings(uint8_t screen_number);
+void LCD_UI_ShowError(uint8_t error_number);
 void LCD_UI_ShowRtcEdit(uint8_t digit_index);
 void LCD_UI_ShowCompanyName(void);
 uint8_t LCD_UI_NextCustomerScreen(uint8_t current_screen);

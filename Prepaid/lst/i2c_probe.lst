@@ -1,12 +1,12 @@
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 1   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE I2C_PROBE
 OBJECT MODULE PLACED IN .\Output\i2c_probe.obj
-COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.EXE src\i2c_probe.c LARGE OMF2 OPTIMIZE(7,SPEED) BROWSE INCDIR(.\src;ve
-                    -ndor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0
-                    -AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\i2c_probe.lst) TABS(2) OBJ
-                    -ECT(.\Output\i2c_probe.obj)
+COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.EXE src\i2c_probe.c LARGE OMF2 OPTIMIZE(7,SIZE) BROWSE INCDIR(.\src;ven
+                    -dor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0A
+                    -E_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\i2c_probe.lst) TABS(2) OBJE
+                    -CT(.\Output\i2c_probe.obj)
 
 line level    source
 
@@ -62,7 +62,7 @@ line level    source
   50          {
   51   1          if (acknowledge) I2CON |= 0x04;
   52   1          else I2CON &= (uint8_t)~0x04;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 2   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 2   
 
   53   1      
   54   1          I2CON &= (uint8_t)~I2C_SI;
@@ -126,7 +126,7 @@ line level    source
  112          
  113          static uint8_t I2C_WriteRegister(uint8_t address, uint8_t register_address,
  114                                           const uint8_t *buffer, uint8_t length)
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 3   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 3   
 
  115          {
  116   1          uint8_t index;
@@ -190,7 +190,7 @@ line level    source
  174          static uint8_t I2C_WriteEEPROM(uint16_t address, const uint8_t *buffer,
  175                                         uint8_t length)
  176          {
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 4   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 4   
 
  177   1          uint8_t index;
  178   1      
@@ -254,7 +254,7 @@ line level    source
  236   1          value &= mask;
  237   1          tens = (uint8_t)((value >> 4) & 0x0F);
  238   1          units = (uint8_t)(value & 0x0F);
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 5   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 5   
 
  239   1          if (tens > 9 || units > 9)
  240   1          {
@@ -318,7 +318,7 @@ line level    source
  298   1      
  299   1          if (!RTC_DateTimeIsValid(datetime)) return 0;
  300   1      
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 6   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 6   
 
  301   1          record[0] = 0x52;
  302   1          record[1] = 0x54;
@@ -382,7 +382,7 @@ line level    source
  360   1      
  361   1          *datetime = candidate;
  362   1          return 1;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 7   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 7   
 
  363   1      }
  364          
@@ -446,7 +446,7 @@ line level    source
  422   1          if (day == 0 || month == 0 || weekday > 6)
  423   1          {
  424   2              rtc_error = 1;
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 8   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 8   
 
  425   2              return 0;
  426   2          }
@@ -505,12 +505,12 @@ line level    source
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   2877    ----
+   CODE SIZE        =   2680    ----
    CONSTANT SIZE    =   ----    ----
    XDATA SIZE       =     10     135
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
-C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/03/2026 16:42:10 PAGE 9   
+C51 COMPILER V9.60.0.0   I2C_PROBE                                                         11/05/2026 12:10:41 PAGE 9   
 
    IDATA SIZE       =   ----    ----
    BIT SIZE         =   ----    ----

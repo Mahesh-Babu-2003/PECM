@@ -1,209 +1,367 @@
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/09/2026 16:51:49 PAGE 1   
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          11/04/2026 13:24:59 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE BOARD_IO
-OBJECT MODULE PLACED IN C:\Users\Dinesh\.copilot\session-state\48682e31-b259-4d1f-8ab3-35f8af34aec9\files\modbus-check\board_io.obj
+OBJECT MODULE PLACED IN C:\Users\Dinesh\.copilot\session-state\5d29eb83-8ab7-482d-ab93-36ec4d382fc4\files\port-build\board_io.obj
 COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.exe src\board_io.c INCDIR(src;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51E
                     -B0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC
-                    -0AE_MS51PC0AE\Library\StdDriver\inc) LARGE OBJECT(C:\Users\Dinesh\.copilot\session-state\48682e31-b259-4d1f-8ab3-35f8af3
-                    -4aec9\files\modbus-check\board_io.obj)
+                    -0AE_MS51PC0AE\Library\StdDriver\inc) LARGE OPTIMIZE(7,SIZE) OBJECTEXTEND OBJECT(C:\Users\Dinesh\.copilot\session-state\5
+                    -d29eb83-8ab7-482d-ab93-36ec4d382fc4\files\port-build\board_io.obj)
 
 line level    source
 
    1          #include "board_io.h"
    2          #include "delay.h"
    3          
-   4          sbit LED_1_PIN = P3^0;
-   5          sbit LED_2_PIN = P1^7;
-   6          sbit BUZZER_PIN = P3^4;
-   7          sbit RELAY_SET_1_PIN = P0^5;
-   8          sbit RELAY_SET_2_PIN = P0^4;
-   9          sbit RELAY_SET_3_PIN = P0^3;
-  10          sbit RELAY_RESET_1_PIN = P0^0;
-  11          sbit RELAY_RESET_2_PIN = P1^0;
-  12          sbit RELAY_RESET_3_PIN = P1^1;
-  13          sbit RS485_1_DE_PIN = P3^3;
-  14          sbit RS485_1_DE_ALT_PIN = P2^5;
-  15          sbit RS485_2_DE_PIN = P0^1;
-  16          sbit SHIFT_DATA_PIN = P2^1;
-  17          sbit SHIFT_CLOCK_PIN = P2^2;
-  18          sbit SHIFT_LATCH_PIN = P2^3;
-  19          sbit KEY_1_PIN = P3^5;
-  20          sbit KEY_2_PIN = P3^2;
-  21          sbit KEY_3_PIN = P3^1;
-  22          sbit IR_INPUT_PIN = P2^4;
+   4          sbit RS485_1_DE_PIN = P3^3;
+   5          sbit RS485_1_DE_ALT_PIN = P2^5;
+   6          sbit RS485_2_DE_PIN = P0^1;
+   7          sbit BOARD_LED_1_PIN = P3^0;
+   8          sbit BOARD_LED_2_PIN = P1^7;
+   9          sbit RELAY_SET_1_PIN = P0^5;
+  10          sbit RELAY_SET_2_PIN = P0^4;
+  11          sbit RELAY_SET_3_PIN = P0^3;
+  12          sbit RELAY_RESET_1_PIN = P0^0;
+  13          sbit RELAY_RESET_2_PIN = P1^0;
+  14          sbit RELAY_RESET_3_PIN = P1^1;
+  15          sbit SHIFT_DATA_PIN = P2^1;
+  16          sbit SHIFT_CLOCK_PIN = P2^2;
+  17          sbit SHIFT_LATCH_PIN = P2^3;
+  18          sbit BOARD_SWITCH_1_PIN = P3^5;
+  19          sbit BOARD_SWITCH_2_PIN = P3^2;
+  20          sbit BOARD_SWITCH_3_PIN = P3^1;
+  21          sbit BOARD_TAMPER_PIN = P2^4;
+  22          sbit BOARD_BUZZER_PIN = P3^4;
   23          
-  24          void Board_RelaysOff(void)
-  25          {
-  26   1          SFRS = 0;
-  27   1          RELAY_SET_1_PIN = 0;
-  28   1          RELAY_SET_2_PIN = 0;
-  29   1          RELAY_SET_3_PIN = 0;
-  30   1          RELAY_RESET_1_PIN = 0;
-  31   1          RELAY_RESET_2_PIN = 0;
-  32   1          RELAY_RESET_3_PIN = 0;
-  33   1      }
-  34          
-  35          void Board_Init(void)
-  36          {
-  37   1          Board_RelaysOff();
-  38   1          BUZZER_PIN = 0;
-  39   1          RS485_1_DE_PIN = 0;
-  40   1          RS485_1_DE_ALT_PIN = 0;
-  41   1          RS485_2_DE_PIN = 0;
-  42   1          LED_1_PIN = 1;
-  43   1          LED_2_PIN = 1;
-  44   1          SHIFT_DATA_PIN = 0;
-  45   1          SHIFT_CLOCK_PIN = 0;
-  46   1          SHIFT_LATCH_PIN = 0;
-  47   1      
-  48   1          P00_PUSHPULL_MODE;
-  49   1          P01_PUSHPULL_MODE;
-  50   1          P03_PUSHPULL_MODE;
-  51   1          P04_PUSHPULL_MODE;
-  52   1          P05_PUSHPULL_MODE;
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/09/2026 16:51:49 PAGE 2   
+  24          #define SWITCH_DEBOUNCE_SAMPLES 20
+  25          #define SWITCH_3_LONG_PRESS_SAMPLES 3000
+  26          #define SWITCH_2_3_LONG_PRESS_SAMPLES 5000
+  27          #define TAMPER_DEBOUNCE_SAMPLES 20
+  28          
+  29          static uint8_t switch_debounce_counter[3];
+  30          static uint8_t switch_stable_pressed;
+  31          static uint16_t switch_3_hold_samples;
+  32          static uint8_t switch_3_long_press_reported;
+  33          static uint8_t switch_2_3_hold_state;
+  34          static uint8_t tamper_status;
+  35          static uint8_t tamper_debounce_counter;
+  36          
+  37          void Board_Init(void)
+  38          {
+  39   1          SFRS = 0;
+  40   1      
+  41   1          RS485_1_DE_PIN = 0;
+  42   1          RS485_1_DE_ALT_PIN = 0;
+  43   1          RS485_2_DE_PIN = 0;
+  44   1          /* The board status LEDs are active-low, so high keeps them off. */
+  45   1          BOARD_LED_1_PIN = 1;
+  46   1          BOARD_LED_2_PIN = 1;
+  47   1          RELAY_SET_1_PIN = 0;
+  48   1          RELAY_SET_2_PIN = 0;
+  49   1          RELAY_SET_3_PIN = 0;
+  50   1          RELAY_RESET_1_PIN = 0;
+  51   1          RELAY_RESET_2_PIN = 0;
+  52   1          RELAY_RESET_3_PIN = 0;
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          11/04/2026 13:24:59 PAGE 2   
 
-  53   1          P10_PUSHPULL_MODE;
-  54   1          P11_PUSHPULL_MODE;
-  55   1          P17_PUSHPULL_MODE;
-  56   1          P21_PUSHPULL_MODE;
-  57   1          P22_PUSHPULL_MODE;
-  58   1          P23_PUSHPULL_MODE;
-  59   1          P25_PUSHPULL_MODE;
-  60   1          P30_PUSHPULL_MODE;
-  61   1          P33_PUSHPULL_MODE;
-  62   1          P34_PUSHPULL_MODE;
-  63   1      
-  64   1          P31_INPUT_MODE;
-  65   1          P32_INPUT_MODE;
-  66   1          P35_INPUT_MODE;
-  67   1          P24_INPUT_MODE;
-  68   1      
-  69   1          P37_QUASI_MODE;
-  70   1          P36_INPUT_MODE;
-  71   1          P06_QUASI_MODE;
-  72   1          P07_INPUT_MODE;
-  73   1          P13_OPENDRAIN_MODE;
-  74   1          P14_OPENDRAIN_MODE;
-  75   1          SFRS = 0;
-  76   1      }
-  77          
-  78          void Board_DelayMs(uint16_t milliseconds)
-  79          {
-  80   1          while (milliseconds >= 1000)
-  81   1          {
-  82   2              Timer0_Delay(24000000UL, 1000, 1000);
-  83   2              milliseconds -= 1000;
-  84   2          }
-  85   1          if (milliseconds != 0)
-  86   1          {
-  87   2              Timer0_Delay(24000000UL, milliseconds, 1000);
-  88   2          }
-  89   1      }
-  90          
-  91          void Board_SetLed(uint8_t led, uint8_t on)
-  92          {
-  93   1          SFRS = 0;
-  94   1          if (led == 1)
-  95   1          {
-  96   2              LED_1_PIN = on ? 0 : 1;
-  97   2          }
-  98   1          else if (led == 2)
-  99   1          {
- 100   2              LED_2_PIN = on ? 0 : 1;
- 101   2          }
- 102   1      }
- 103          
- 104          void Board_SetBuzzer(uint8_t on)
- 105          {
- 106   1          SFRS = 0;
- 107   1          BUZZER_PIN = on ? 1 : 0;
- 108   1      }
- 109          
- 110          void Board_PulseRelay(uint8_t channel, uint8_t set_coil, uint16_t milliseconds)
- 111          {
- 112   1          SFRS = 0;
- 113   1          if (channel == 1)
- 114   1          {
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/09/2026 16:51:49 PAGE 3   
+  53   1          SHIFT_DATA_PIN = 0;
+  54   1          SHIFT_CLOCK_PIN = 0;
+  55   1          SHIFT_LATCH_PIN = 0;
+  56   1          BOARD_TAMPER_PIN = 1;
+  57   1          BOARD_BUZZER_PIN = 0;
+  58   1      
+  59   1          P01_PUSHPULL_MODE;
+  60   1          P00_PUSHPULL_MODE;
+  61   1          P03_PUSHPULL_MODE;
+  62   1          P04_PUSHPULL_MODE;
+  63   1          P05_PUSHPULL_MODE;
+  64   1          P10_PUSHPULL_MODE;
+  65   1          P11_PUSHPULL_MODE;
+  66   1          P17_PUSHPULL_MODE;
+  67   1          P30_PUSHPULL_MODE;
+  68   1          P21_PUSHPULL_MODE;
+  69   1          P22_PUSHPULL_MODE;
+  70   1          P23_PUSHPULL_MODE;
+  71   1          P35_INPUT_MODE;
+  72   1          P32_INPUT_MODE;
+  73   1          P31_INPUT_MODE;
+  74   1          P24_QUASI_MODE;
+  75   1          P34_PUSHPULL_MODE;
+  76   1          P25_PUSHPULL_MODE;
+  77   1          P33_PUSHPULL_MODE;
+  78   1      
+  79   1          /* UART1 / RS-485 port 1 and UART0 / RS-485 port 2 pins. */
+  80   1          P37_INPUT_MODE;
+  81   1          P36_QUASI_MODE;
+  82   1          P06_PUSHPULL_MODE;
+  83   1          P07_INPUT_MODE;
+  84   1      
+  85   1          SFRS = 0;
+  86   1          tamper_status = BOARD_TAMPER_PIN ? 1 : 0;
+  87   1          tamper_debounce_counter = 0;
+  88   1      }
+  89          
+  90          void Board_DelayMs(uint16_t milliseconds)
+  91          {
+  92   1          while (milliseconds >= 1000)
+  93   1          {
+  94   2              Timer0_Delay(24000000UL, 1000, 1000);
+  95   2              milliseconds -= 1000;
+  96   2          }
+  97   1          if (milliseconds != 0)
+  98   1          {
+  99   2              Timer0_Delay(24000000UL, milliseconds, 1000);
+ 100   2          }
+ 101   1      }
+ 102          
+ 103          void Board_SetRs485Transmit(uint8_t port, uint8_t enable)
+ 104          {
+ 105   1          SFRS = 0;
+ 106   1          if (port == 1)
+ 107   1          {
+ 108   2              RS485_1_DE_PIN = enable ? 1 : 0;
+ 109   2              RS485_1_DE_ALT_PIN = enable ? 1 : 0;
+ 110   2          }
+ 111   1          else if (port == 2)
+ 112   1          {
+ 113   2              RS485_2_DE_PIN = enable ? 1 : 0;
+ 114   2          }
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          11/04/2026 13:24:59 PAGE 3   
 
- 115   2              if (set_coil) RELAY_SET_1_PIN = 1;
- 116   2              else RELAY_RESET_1_PIN = 1;
- 117   2          }
- 118   1          else if (channel == 2)
- 119   1          {
- 120   2              if (set_coil) RELAY_SET_2_PIN = 1;
- 121   2              else RELAY_RESET_2_PIN = 1;
- 122   2          }
- 123   1          else if (channel == 3)
- 124   1          {
- 125   2              if (set_coil) RELAY_SET_3_PIN = 1;
- 126   2              else RELAY_RESET_3_PIN = 1;
- 127   2          }
- 128   1          else
- 129   1          {
- 130   2              return;
- 131   2          }
- 132   1      
- 133   1          Board_DelayMs(milliseconds);
- 134   1          Board_RelaysOff();
- 135   1      }
- 136          
- 137          void Board_SetRs485Transmit(uint8_t port, uint8_t enable)
- 138          {
- 139   1          SFRS = 0;
- 140   1          if (port == 1)
- 141   1          {
- 142   2              RS485_1_DE_PIN = enable ? 1 : 0;
- 143   2              RS485_1_DE_ALT_PIN = enable ? 1 : 0;
- 144   2          }
- 145   1          else if (port == 2)
- 146   1          {
- 147   2              RS485_2_DE_PIN = enable ? 1 : 0;
- 148   2          }
- 149   1      }
- 150          
- 151          void Board_Shift595(uint8_t value)
- 152          {
- 153   1          uint8_t bit_index;
- 154   1      
- 155   1          SFRS = 0;
- 156   1          SHIFT_LATCH_PIN = 0;
- 157   1          for (bit_index = 0; bit_index < 8; bit_index++)
- 158   1          {
- 159   2              SHIFT_CLOCK_PIN = 0;
- 160   2              SHIFT_DATA_PIN = (value & 0x80) ? 1 : 0;
- 161   2              SHIFT_CLOCK_PIN = 1;
- 162   2              value <<= 1;
+ 115   1      }
+ 116          
+ 117          static void Board_RelayCoilsOff(void)
+ 118          {
+ 119   1          SFRS = 0;
+ 120   1          RELAY_SET_1_PIN = 0;
+ 121   1          RELAY_SET_2_PIN = 0;
+ 122   1          RELAY_SET_3_PIN = 0;
+ 123   1          RELAY_RESET_1_PIN = 0;
+ 124   1          RELAY_RESET_2_PIN = 0;
+ 125   1          RELAY_RESET_3_PIN = 0;
+ 126   1      }
+ 127          
+ 128          void Board_PulseRelay(uint8_t channel, uint8_t turn_on, uint16_t milliseconds)
+ 129          {
+ 130   1          SFRS = 0;
+ 131   1          if (channel == 1)
+ 132   1          {
+ 133   2              if (turn_on) RELAY_SET_1_PIN = 1;
+ 134   2              else RELAY_RESET_1_PIN = 1;
+ 135   2          }
+ 136   1          else if (channel == 2)
+ 137   1          {
+ 138   2              if (turn_on) RELAY_SET_2_PIN = 1;
+ 139   2              else RELAY_RESET_2_PIN = 1;
+ 140   2          }
+ 141   1          else if (channel == 3)
+ 142   1          {
+ 143   2              if (turn_on) RELAY_SET_3_PIN = 1;
+ 144   2              else RELAY_RESET_3_PIN = 1;
+ 145   2          }
+ 146   1          else
+ 147   1          {
+ 148   2              return;
+ 149   2          }
+ 150   1      
+ 151   1          Board_DelayMs(milliseconds);
+ 152   1          Board_RelayCoilsOff();
+ 153   1      }
+ 154          
+ 155          void Board_PulseAllRelays(uint8_t turn_on, uint16_t milliseconds)
+ 156          {
+ 157   1          SFRS = 0;
+ 158   1          if (turn_on)
+ 159   1          {
+ 160   2              RELAY_SET_1_PIN = 1;
+ 161   2              RELAY_SET_2_PIN = 1;
+ 162   2              RELAY_SET_3_PIN = 1;
  163   2          }
- 164   1          SHIFT_CLOCK_PIN = 0;
- 165   1          SHIFT_LATCH_PIN = 1;
- 166   1          SHIFT_LATCH_PIN = 0;
- 167   1      }
- 168          
- 169          uint8_t Board_KeyPressed(uint8_t key)
- 170          {
- 171   1          SFRS = 0;
- 172   1          if (key == 1) return (KEY_1_PIN == 0);
- 173   1          if (key == 2) return (KEY_2_PIN == 0);
- 174   1          if (key == 3) return (KEY_3_PIN == 0);
- 175   1          return 0;
- 176   1      }
-C51 COMPILER V9.60.0.0   BOARD_IO                                                          10/09/2026 16:51:49 PAGE 4   
+ 164   1          else
+ 165   1          {
+ 166   2              RELAY_RESET_1_PIN = 1;
+ 167   2              RELAY_RESET_2_PIN = 1;
+ 168   2              RELAY_RESET_3_PIN = 1;
+ 169   2          }
+ 170   1          Board_DelayMs(milliseconds);
+ 171   1          Board_RelayCoilsOff();
+ 172   1      }
+ 173          
+ 174          void Board_Shift595(uint8_t value)
+ 175          {
+ 176   1          uint8_t bit_index;
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          11/04/2026 13:24:59 PAGE 4   
 
- 177          
- 178          uint8_t Board_IrActive(void)
- 179          {
- 180   1          SFRS = 2;
- 181   1          return (IR_INPUT_PIN == 0);
- 182   1      }
+ 177   1      
+ 178   1          SFRS = 0;
+ 179   1          SHIFT_LATCH_PIN = 0;
+ 180   1          for (bit_index = 0; bit_index < 8; bit_index++)
+ 181   1          {
+ 182   2              SHIFT_CLOCK_PIN = 0;
+ 183   2              SHIFT_DATA_PIN = (value & 0x80) ? 1 : 0;
+ 184   2              SHIFT_CLOCK_PIN = 1;
+ 185   2              value <<= 1;
+ 186   2          }
+ 187   1          SHIFT_CLOCK_PIN = 0;
+ 188   1          SHIFT_LATCH_PIN = 1;
+ 189   1          SHIFT_LATCH_PIN = 0;
+ 190   1      }
+ 191          
+ 192          uint8_t Board_ReadSwitchPresses(void)
+ 193          {
+ 194   1          uint8_t raw_pressed;
+ 195   1          uint8_t button_mask;
+ 196   1          uint8_t button_index;
+ 197   1          uint8_t pressed;
+ 198   1          uint8_t events;
+ 199   1      
+ 200   1          SFRS = 0;
+ 201   1          raw_pressed = 0;
+ 202   1          if (!BOARD_SWITCH_1_PIN) raw_pressed |= BOARD_SWITCH_1;
+ 203   1          if (!BOARD_SWITCH_2_PIN) raw_pressed |= BOARD_SWITCH_2;
+ 204   1          if (!BOARD_SWITCH_3_PIN) raw_pressed |= BOARD_SWITCH_3;
+ 205   1      
+ 206   1          events = 0;
+ 207   1          button_mask = BOARD_SWITCH_1;
+ 208   1          for (button_index = 0; button_index < 3; button_index++)
+ 209   1          {
+ 210   2              pressed = (raw_pressed & button_mask) ? 1 : 0;
+ 211   2              if (pressed != ((switch_stable_pressed & button_mask) ? 1 : 0))
+ 212   2              {
+ 213   3                  if (switch_debounce_counter[button_index] < SWITCH_DEBOUNCE_SAMPLES)
+ 214   3                  {
+ 215   4                      switch_debounce_counter[button_index]++;
+ 216   4                  }
+ 217   3                  if (switch_debounce_counter[button_index] >= SWITCH_DEBOUNCE_SAMPLES)
+ 218   3                  {
+ 219   4                      switch_debounce_counter[button_index] = 0;
+ 220   4                      if (pressed)
+ 221   4                      {
+ 222   5                          switch_stable_pressed |= button_mask;
+ 223   5                          events |= button_mask;
+ 224   5                      }
+ 225   4                      else
+ 226   4                      {
+ 227   5                          switch_stable_pressed &= (uint8_t)~button_mask;
+ 228   5                          if (button_mask == BOARD_SWITCH_3 &&
+ 229   5                              !switch_3_long_press_reported)
+ 230   5                          {
+ 231   6                              events |= BOARD_SWITCH_3_RELEASED;
+ 232   6                          }
+ 233   5                      }
+ 234   4                  }
+ 235   3              }
+ 236   2              else
+ 237   2              {
+ 238   3                  switch_debounce_counter[button_index] = 0;
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          11/04/2026 13:24:59 PAGE 5   
+
+ 239   3              }
+ 240   2              button_mask <<= 1;
+ 241   2          }
+ 242   1      
+ 243   1          if ((switch_stable_pressed & (BOARD_SWITCH_2 | BOARD_SWITCH_3)) ==
+ 244   1              (BOARD_SWITCH_2 | BOARD_SWITCH_3))
+ 245   1          {
+ 246   2              if (switch_2_3_hold_state == 0)
+ 247   2              {
+ 248   3                  switch_2_3_hold_state = 1;
+ 249   3                  switch_3_hold_samples = 0;
+ 250   3                  switch_3_long_press_reported = 1;
+ 251   3              }
+ 252   2              if (switch_2_3_hold_state == 1)
+ 253   2              {
+ 254   3                  if (switch_3_hold_samples < SWITCH_2_3_LONG_PRESS_SAMPLES)
+ 255   3                  {
+ 256   4                      switch_3_hold_samples++;
+ 257   4                  }
+ 258   3                  if (switch_3_hold_samples >= SWITCH_2_3_LONG_PRESS_SAMPLES)
+ 259   3                  {
+ 260   4                      events |= BOARD_SWITCH_2_3_LONG;
+ 261   4                      switch_2_3_hold_state = 2;
+ 262   4                  }
+ 263   3              }
+ 264   2          }
+ 265   1          else
+ 266   1          {
+ 267   2              if (switch_2_3_hold_state != 0)
+ 268   2              {
+ 269   3                  switch_2_3_hold_state = 0;
+ 270   3                  switch_3_hold_samples = 0;
+ 271   3                  switch_3_long_press_reported = 0;
+ 272   3              }
+ 273   2              if (switch_stable_pressed & BOARD_SWITCH_3)
+ 274   2              {
+ 275   3                  if (switch_3_hold_samples < SWITCH_3_LONG_PRESS_SAMPLES)
+ 276   3                  {
+ 277   4                      switch_3_hold_samples++;
+ 278   4                  }
+ 279   3                  if (switch_3_hold_samples >= SWITCH_3_LONG_PRESS_SAMPLES &&
+ 280   3                      !switch_3_long_press_reported)
+ 281   3                  {
+ 282   4                      events |= BOARD_SWITCH_3_LONG;
+ 283   4                      switch_3_long_press_reported = 1;
+ 284   4                  }
+ 285   3              }
+ 286   2              else
+ 287   2              {
+ 288   3                  switch_3_hold_samples = 0;
+ 289   3                  switch_3_long_press_reported = 0;
+ 290   3              }
+ 291   2          }
+ 292   1          return events;
+ 293   1      }
+ 294          
+ 295          uint8_t Board_GetStableSwitches(void)
+ 296          {
+ 297   1          return switch_stable_pressed;
+ 298   1      }
+ 299          
+ 300          uint8_t Board_GetTamperStatus(void)
+C51 COMPILER V9.60.0.0   BOARD_IO                                                          11/04/2026 13:24:59 PAGE 6   
+
+ 301          {
+ 302   1          uint8_t raw_status;
+ 303   1      
+ 304   1          SFRS = 0;
+ 305   1          raw_status = BOARD_TAMPER_PIN ? 1 : 0;
+ 306   1          if (raw_status != tamper_status)
+ 307   1          {
+ 308   2              if (tamper_debounce_counter < TAMPER_DEBOUNCE_SAMPLES)
+ 309   2              {
+ 310   3                  tamper_debounce_counter++;
+ 311   3              }
+ 312   2              if (tamper_debounce_counter >= TAMPER_DEBOUNCE_SAMPLES)
+ 313   2              {
+ 314   3                  tamper_status = raw_status;
+ 315   3                  tamper_debounce_counter = 0;
+ 316   3              }
+ 317   2          }
+ 318   1          else
+ 319   1          {
+ 320   2              tamper_debounce_counter = 0;
+ 321   2          }
+ 322   1          return tamper_status;
+ 323   1      }
+ 324          
+ 325          void Board_SetBuzzer(uint8_t on)
+ 326          {
+ 327   1          SFRS = 0;
+ 328   1          BOARD_BUZZER_PIN = on ? 1 : 0;
+ 329   1      }
+ 330          
+ 331          void Board_Beep(uint16_t milliseconds)
+ 332          {
+ 333   1          Board_SetBuzzer(1);
+ 334   1          Board_DelayMs(milliseconds);
+ 335   1          Board_SetBuzzer(0);
+ 336   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =    620    ----
+   CODE SIZE        =   1036    ----
    CONSTANT SIZE    =   ----    ----
-   XDATA SIZE       =   ----       2
+   XDATA SIZE       =     10       2
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
    IDATA SIZE       =   ----    ----

@@ -23,12 +23,14 @@ sbit BOARD_BUZZER_PIN = P3^4;
 
 #define SWITCH_DEBOUNCE_SAMPLES 20
 #define SWITCH_3_LONG_PRESS_SAMPLES 3000
+#define SWITCH_2_3_LONG_PRESS_SAMPLES 5000
 #define TAMPER_DEBOUNCE_SAMPLES 20
 
 static uint8_t switch_debounce_counter[3];
 static uint8_t switch_stable_pressed;
 static uint16_t switch_3_hold_samples;
 static uint8_t switch_3_long_press_reported;
+static uint8_t switch_2_3_hold_state;
 static uint8_t tamper_status;
 static uint8_t tamper_debounce_counter;
 
@@ -39,9 +41,9 @@ void Board_Init(void)
     RS485_1_DE_PIN = 0;
     RS485_1_DE_ALT_PIN = 0;
     RS485_2_DE_PIN = 0;
-    /* The board status LEDs are active-low, so high keeps them off. */
-    BOARD_LED_1_PIN = 1;
-    BOARD_LED_2_PIN = 1;
+    /* These pins drive LED transistor bases; low keeps LEDs 5 and 6 off. */
+    BOARD_LED_1_PIN = 0;
+    BOARD_LED_2_PIN = 0;
     RELAY_SET_1_PIN = 0;
     RELAY_SET_2_PIN = 0;
     RELAY_SET_3_PIN = 0;
@@ -238,23 +240,54 @@ uint8_t Board_ReadSwitchPresses(void)
         button_mask <<= 1;
     }
 
-    if (switch_stable_pressed & BOARD_SWITCH_3)
+    if ((switch_stable_pressed & (BOARD_SWITCH_2 | BOARD_SWITCH_3)) ==
+        (BOARD_SWITCH_2 | BOARD_SWITCH_3))
     {
-        if (switch_3_hold_samples < SWITCH_3_LONG_PRESS_SAMPLES)
+        if (switch_2_3_hold_state == 0)
         {
-            switch_3_hold_samples++;
-        }
-        if (switch_3_hold_samples >= SWITCH_3_LONG_PRESS_SAMPLES &&
-            !switch_3_long_press_reported)
-        {
-            events |= BOARD_SWITCH_3_LONG;
+            switch_2_3_hold_state = 1;
+            switch_3_hold_samples = 0;
             switch_3_long_press_reported = 1;
+        }
+        if (switch_2_3_hold_state == 1)
+        {
+            if (switch_3_hold_samples < SWITCH_2_3_LONG_PRESS_SAMPLES)
+            {
+                switch_3_hold_samples++;
+            }
+            if (switch_3_hold_samples >= SWITCH_2_3_LONG_PRESS_SAMPLES)
+            {
+                events |= BOARD_SWITCH_2_3_LONG;
+                switch_2_3_hold_state = 2;
+            }
         }
     }
     else
     {
-        switch_3_hold_samples = 0;
-        switch_3_long_press_reported = 0;
+        if (switch_2_3_hold_state != 0)
+        {
+            switch_2_3_hold_state = 0;
+            switch_3_hold_samples = 0;
+            switch_3_long_press_reported = 0;
+        }
+        if (switch_stable_pressed & BOARD_SWITCH_3)
+        {
+            if (switch_3_hold_samples < SWITCH_3_LONG_PRESS_SAMPLES)
+            {
+                switch_3_hold_samples++;
+            }
+            if (switch_3_hold_samples >= SWITCH_3_LONG_PRESS_SAMPLES &&
+                !switch_3_long_press_reported)
+            {
+                events |= BOARD_SWITCH_3_LONG;
+                switch_3_long_press_reported = 1;
+            }
+        }
+        else
+        {
+            switch_3_hold_samples = 0;
+            switch_3_long_press_reported = 0;
+        }
     }
     return events;
 }

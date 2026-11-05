@@ -21,6 +21,7 @@
 #define RTU_FRAME_GAP_MS        4
 #define MASTER_TIMEOUT_MS       300
 #define MASTER_POLL_INTERVAL_MS 1000
+#define METER_FAILURES_BEFORE_DISCONNECT 2
 #define RX_BUFFER_SIZE          128
 #define TX_BUFFER_SIZE          256
 #define METER_EEPROM_ADDRESS    0x50
@@ -256,6 +257,7 @@ static volatile uint8_t port2_tx_complete;
 static uint8_t master_waiting;
 static uint16_t master_timer_ms;
 static uint16_t master_timeout_ms;
+static uint8_t meter_consecutive_failures;
 static uint16_t xdata meter_eeprom_last_saved[METER_REGISTER_COUNT];
 static uint8_t xdata meter_eeprom_record[METER_EEPROM_RECORD_SIZE];
 static uint8_t xdata comm_config_record[COMM_CONFIG_RECORD_SIZE];
@@ -393,6 +395,12 @@ static void RS485_UpdatePort2CommunicationFlag(void)
         return;
     }
 
+    if (meter_consecutive_failures < METER_FAILURES_BEFORE_DISCONNECT)
+    {
+        slave_holding_registers[PORT2_COMMUNICATION_LOST_OFFSET] = 0;
+        return;
+    }
+
     slave_holding_registers[PORT2_COMMUNICATION_LOST_OFFSET] = 1;
     if (!meter_disconnect_timestamp_recorded &&
         energy_meter_request_count != 0 && !master_waiting)
@@ -523,8 +531,7 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     if (offset == SLAVE_RELAY_COMMAND_OFFSET)
     {
         if (value > 1) return 0;
-        return (uint8_t)(value == 1 ||
-            (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0);
+        return (uint8_t)(value == 1 || !load_overload_disconnected);
     }
     if (offset == SLAVE_PORT1_BAUD_OFFSET ||
         offset == SLAVE_PORT2_BAUD_OFFSET)
@@ -572,7 +579,7 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
     }
     if (offset == BMS_RELAY_OVERRIDE_OFFSET)
     {
-        return (uint8_t)(value <= 1);
+        return (uint8_t)(value <= 2);
     }
     if (offset == CONSUMPTION_AFTER_DISCONNECT_OFFSET)
     {
@@ -602,6 +609,7 @@ static uint8_t RS485_IsWritableRegisterValueValid(uint16_t offset,
         offset == RTC_ERROR_OFFSET ||
         offset == EEPROM_ERROR_OFFSET ||
         offset == PORT2_COMMUNICATION_LOST_OFFSET ||
+        offset == OVERLOAD_DISCONNECT_ACTIVE_OFFSET ||
         (offset >= METER_DISCONNECT_TIMESTAMP_VALID_OFFSET &&
             offset <= METER_DISCONNECT_TIMESTAMP_SECOND_OFFSET) ||
         offset >= RESERVED_FIRST_OFFSET)
@@ -1575,7 +1583,10 @@ static void Prepaid_ResetBalanceToZero(void)
     prepaid_total_recharge_amount = Prepaid_GetSelectedConsumptionCost();
     prepaid_deduction_baseline = prepaid_total_recharge_amount;
     Prepaid_SetBalance(0);
-    slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] = 0;
+    if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] == 1)
+    {
+        slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] = 0;
+    }
     prepaid_relay_sync_pending = 1;
     PrepaidEeprom_RequestSave();
     prepaid_ui_events |= PREPAID_UI_EVENT_BALANCE |
@@ -1590,8 +1601,19 @@ static void Prepaid_ServiceBalanceRelays(void)
 
     if (!prepaid_relay_sync_pending) return;
     prepaid_relay_sync_pending = 0;
-    desired_state = ((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0 ||
-        slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] != 0) ? 1 : 0;
+    if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] == 1)
+    {
+        desired_state = 1;
+    }
+    else if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] == 2)
+    {
+        desired_state = 0;
+    }
+    else
+    {
+        desired_state =
+            ((int16_t)slave_holding_registers[BALANCE_OFFSET] > 0) ? 1 : 0;
+    }
     if (load_overload_disconnected)
     {
         desired_state = 0;
@@ -1614,6 +1636,24 @@ static void Prepaid_ServiceBalanceRelays(void)
             PREPAID_UI_EVENT_ACTIVITY;
     }
     Prepaid_UpdateRelayDisconnectStatus();
+}
+
+void RS485_ClearErrorFlags(void)
+{
+    if (slave_holding_registers[PORT2_COMMUNICATION_LOST_OFFSET] == 0 &&
+        slave_holding_registers[RELAY_ERROR_OFFSET] == 0 &&
+        rtc_error == 0 && meter_eeprom_last_error == 0)
+    {
+        return;
+    }
+
+    slave_holding_registers[PORT2_COMMUNICATION_LOST_OFFSET] = 0;
+    slave_holding_registers[RELAY_ERROR_OFFSET] = 0;
+    rtc_error = 0;
+    meter_eeprom_last_error = 0;
+    energy_meter_last_error = ENERGY_METER_ERROR_NONE;
+    meter_consecutive_failures = 0;
+    meter_disconnect_timestamp_recorded = 0;
 }
 
 static uint8_t Prepaid_GetLoadParameterValue(uint32_t *value)
@@ -1966,7 +2006,7 @@ static void PrepaidEeprom_Load(void)
                 Prepaid_ReadRecordU16(48);
             slave_holding_registers[CONSUMPTION_AFTER_DISCONNECT_OFFSET] =
                 Prepaid_ReadRecordU16(50);
-            if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] > 1 ||
+            if (slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] > 2 ||
                 slave_holding_registers[CONSUMPTION_AFTER_DISCONNECT_OFFSET] > 1)
             {
                 Prepaid_SetDefaults();
@@ -2312,7 +2352,8 @@ static void Prepaid_CommitChanges(uint8_t change_flags)
     }
     if ((change_flags & PREPAID_CHANGE_CREDIT) &&
         (int16_t)slave_holding_registers[RECHARGE_INPUT_OFFSET] != 0 &&
-        (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0)
+        (int16_t)slave_holding_registers[BALANCE_OFFSET] > 0 &&
+        slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] == 1)
     {
         /* A successful recharge returns control to normal balance logic. */
         slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] = 0;
@@ -2471,6 +2512,21 @@ static void RS485_ClearMeterRegisters(void)
     for (index = 0; index < METER_REGISTER_COUNT; index++)
     {
         energy_meter_registers[index] = 0;
+        s_energy_meter_registers[index] = 0;
+    }
+}
+
+static void RS485_RecordMeterFailure(void)
+{
+    if (meter_consecutive_failures < METER_FAILURES_BEFORE_DISCONNECT)
+    {
+        meter_consecutive_failures++;
+    }
+    if (meter_consecutive_failures >= METER_FAILURES_BEFORE_DISCONNECT)
+    {
+        energy_meter_connected = 0;
+        energy_meter_data_valid = 0;
+        RS485_ClearMeterRegisters();
     }
 }
 
@@ -2669,6 +2725,7 @@ static void RS485_ApplyCommunicationConfig(void)
         energy_meter_master_state = 0;
         energy_meter_connected = 0;
         energy_meter_data_valid = 0;
+        meter_consecutive_failures = 0;
         master_timer_ms = MASTER_POLL_INTERVAL_MS;
     }
     if (changed)
@@ -2857,9 +2914,9 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             return;
         }
 
-        /* 40062 is a live communication-loss indication, not a retained
-         * status.  A successful Port 2 meter reply clears it; a timeout,
-         * exception, or invalid reply sets it. */
+        /* 40075 is a live communication-loss indication, not a retained
+         * status.  It clears on a successful meter reply and is set after
+         * consecutive failed polls reach the disconnect threshold. */
         RS485_UpdatePort2CommunicationFlag();
 
         /* Controller registers use offsets 0..150; meter data uses 200..249. */
@@ -2878,6 +2935,18 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                     /* Report the live settings, not an incomplete baud write. */
                     value = RS485_ReadActiveCommunicationRegister(
                         register_offset);
+                }
+                else if (register_offset == RTC_ERROR_OFFSET)
+                {
+                    value = rtc_error ? 1 : 0;
+                }
+                else if (register_offset == EEPROM_ERROR_OFFSET)
+                {
+                    value = meter_eeprom_last_error ? 1 : 0;
+                }
+                else if (register_offset == OVERLOAD_DISCONNECT_ACTIVE_OFFSET)
+                {
+                    value = load_overload_disconnected ? 1 : 0;
                 }
                 else
                 {
@@ -2941,6 +3010,10 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
             (uint8_t)slave_holding_registers[RELAY_DISCONNECT_STATUS_OFFSET];
         if (start_address == SLAVE_RELAY_COMMAND_OFFSET)
         {
+            slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] =
+                (value == 0) ? 1 : 2;
+            prepaid_relay_sync_pending = 0;
+            PrepaidEeprom_RequestSave();
             if (Prepaid_SetAllRelays((uint8_t)(value == 0)))
             {
                 change_flags |= PREPAID_CHANGE_LOADS;
@@ -3094,6 +3167,10 @@ static void Modbus_HandleSlaveFrame(uint8_t length)
                     port1_rx_buffer[8 + (index * 2)];
             if (register_offset == SLAVE_RELAY_COMMAND_OFFSET)
             {
+                slave_holding_registers[BMS_RELAY_OVERRIDE_OFFSET] =
+                    (value == 0) ? 1 : 2;
+                prepaid_relay_sync_pending = 0;
+                PrepaidEeprom_RequestSave();
                 if (Prepaid_SetAllRelays((uint8_t)(value == 0)))
                 {
                     change_flags |= PREPAID_CHANGE_LOADS;
@@ -3193,9 +3270,7 @@ static void RS485_HandleMeterResponse(uint8_t length)
     {
         energy_meter_last_error = ENERGY_METER_ERROR_EXCEPTION;
         energy_meter_last_exception = port2_rx_buffer[2];
-        energy_meter_connected = 0;
-        energy_meter_data_valid = 0;
-        RS485_ClearMeterRegisters();
+        RS485_RecordMeterFailure();
         master_waiting = 0;
         energy_meter_master_state = 0;
         return;
@@ -3210,9 +3285,7 @@ static void RS485_HandleMeterResponse(uint8_t length)
         {
             energy_meter_invalid_frame_count++;
         }
-        energy_meter_connected = 0;
-        energy_meter_data_valid = 0;
-        RS485_ClearMeterRegisters();
+        RS485_RecordMeterFailure();
         master_waiting = 0;
         energy_meter_master_state = 0;
         return;
@@ -3227,6 +3300,7 @@ static void RS485_HandleMeterResponse(uint8_t length)
     }
     energy_meter_connected = 1;
     energy_meter_data_valid = 1;
+    meter_consecutive_failures = 0;
     MeterEeprom_RequestSave();
     energy_meter_last_error = ENERGY_METER_ERROR_NONE;
     energy_meter_last_exception = 0;
@@ -3281,6 +3355,7 @@ void RS485_TestInit(void)
     energy_meter_parity_error_count = 0;
     energy_meter_invalid_frame_count = 0;
     energy_meter_last_exception = 0;
+    meter_consecutive_failures = 0;
     port1_rx_byte_count = 0;
     port1_parity_error_count = 0;
     port1_valid_request_count = 0;
@@ -3442,14 +3517,12 @@ void RS485_Poll(void)
             energy_meter_master_state = 0;
             port2_rx_length = 0;
             port2_rx_parity_error = 0;
-            energy_meter_connected = 0;
-            energy_meter_data_valid = 0;
             energy_meter_last_error = ENERGY_METER_ERROR_TIMEOUT;
+            RS485_RecordMeterFailure();
             if (energy_meter_timeout_count != 0xFFFF)
             {
                 energy_meter_timeout_count++;
             }
-            RS485_ClearMeterRegisters();
         }
     }
 

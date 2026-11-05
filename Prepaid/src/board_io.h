@@ -8,6 +8,7 @@
 #define BOARD_SWITCH_3 0x04
 #define BOARD_SWITCH_3_LONG 0x08
 #define BOARD_SWITCH_3_RELEASED 0x10
+#define BOARD_SWITCH_2_3_LONG 0x20
 
 void Board_Init(void);
 void Board_DelayMs(uint16_t milliseconds);

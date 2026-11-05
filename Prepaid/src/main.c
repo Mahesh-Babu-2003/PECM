@@ -34,8 +34,22 @@ static uint16_t rtc_edit_entry_timer;
 static uint8_t customer_display_screen;
 static uint16_t customer_display_timer;
 static uint16_t customer_value_refresh_timer;
+static uint8_t port_settings_screen;
+static uint8_t displayed_error;
+static uint8_t error_reset_press_count;
 /* Main-loop ticks per second; change this to adjust all buzzer timings. */
 static uint16_t buzzer_second_setting_ticks = 1000;
+
+static uint8_t GetActiveDisplayError(void)
+{
+    if (slave_holding_registers[PORT2_COMMUNICATION_LOST_OFFSET] != 0)
+        return 1;
+    if (slave_holding_registers[RELAY_ERROR_OFFSET] != 0)
+        return 2;
+    if (rtc_error) return 3;
+    if (meter_eeprom_last_error != 0) return 4;
+    return 0;
+}
 
 static void UpdateLowBalanceBuzzer(void)
 {
@@ -237,6 +251,7 @@ void main(void)
     uint8_t screen_changed;
     uint8_t prepaid_events;
     uint8_t backlight_activity;
+    uint8_t active_error;
     uint16_t backlight_timeout;
     uint8_t switch_events;
     uint8_t switch_press_events;
@@ -257,6 +272,8 @@ void main(void)
     backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
     customer_display_screen = LCD_UI_SCREEN_1_CUSTOMER_ID;
     customer_display_timer = 0;
+    port_settings_screen = 0;
+    displayed_error = 0;
     LCD_UI_ShowCompanyName();
 
     while (1)
@@ -297,6 +314,7 @@ void main(void)
             rtc_poll_timer++;
         }
 
+        active_error = GetActiveDisplayError();
         switch_events = Board_ReadSwitchPresses();
         if (switch_events != 0)
         {
@@ -309,7 +327,60 @@ void main(void)
             Board_Beep(35);
         }
 
-        if (!rtc_edit_active)
+        if (active_error == 0)
+        {
+            error_reset_press_count = 0;
+        }
+        else
+        {
+            if (switch_press_events & BOARD_SWITCH_3)
+            {
+                if (error_reset_press_count < 5)
+                {
+                    error_reset_press_count++;
+                }
+                if (error_reset_press_count >= 5)
+                {
+                    RS485_ClearErrorFlags();
+                    error_reset_press_count = 0;
+                }
+            }
+        }
+
+        if (active_error == 0 && !rtc_edit_active &&
+            (switch_events & BOARD_SWITCH_2_3_LONG))
+        {
+            rtc_edit_entry_press_count = 0;
+            rtc_edit_entry_timer = 0;
+            customer_display_timer = 0;
+            customer_value_refresh_timer = 0;
+            if (port_settings_screen != 0)
+            {
+                port_settings_screen = 0;
+                LCD_UI_ShowCustomerScreen(customer_display_screen);
+            }
+            else
+            {
+                port_settings_screen = 1;
+                LCD_UI_ShowPortSettings(port_settings_screen);
+            }
+        }
+
+        if (active_error == 0 && port_settings_screen != 0)
+        {
+            if (switch_press_events & BOARD_SWITCH_1)
+            {
+                port_settings_screen++;
+                if (port_settings_screen >
+                    LCD_UI_PORT_SETTINGS_SCREEN_COUNT)
+                {
+                    port_settings_screen = 1;
+                }
+                customer_value_refresh_timer = 0;
+                LCD_UI_ShowPortSettings(port_settings_screen);
+            }
+        }
+        else if (active_error == 0 && !rtc_edit_active)
         {
             if (switch_press_events & BOARD_SWITCH_2)
             {
@@ -349,7 +420,7 @@ void main(void)
                 rtc_edit_entry_timer = 0;
             }
         }
-        else if (switch_events & BOARD_SWITCH_3_LONG)
+        else if (active_error == 0 && (switch_events & BOARD_SWITCH_3_LONG))
         {
             rtc_save_datetime.year = rtc_datetime.year;
             rtc_save_datetime.month = rtc_datetime.month;
@@ -382,7 +453,7 @@ void main(void)
             }
             screen_changed = 1;
         }
-        else if (rtc_edit_active)
+        else if (active_error == 0 && rtc_edit_active)
         {
             if (switch_press_events & BOARD_SWITCH_1)
             {
@@ -402,7 +473,9 @@ void main(void)
             }
         }
 
-        if (!rtc_edit_active && (switch_press_events & BOARD_SWITCH_1))
+        if (active_error == 0 && !rtc_edit_active &&
+            port_settings_screen == 0 &&
+            (switch_press_events & BOARD_SWITCH_1))
         {
             customer_display_screen = LCD_UI_NextCustomerScreen(
                 customer_display_screen);
@@ -447,12 +520,44 @@ void main(void)
             backlight_applied = (back_light_on == BACK_LIGHT_ON) ? 1 : 0;
         }
 
-        if (rtc_edit_active)
+        active_error = GetActiveDisplayError();
+        if (active_error != 0)
         {
-            if (screen_changed) LCD_UI_ShowRtcEdit(rtc_edit_digit);
+            if (displayed_error != active_error)
+                LCD_UI_ShowError(active_error);
+            displayed_error = active_error;
+        }
+        else if (rtc_edit_active)
+        {
+            if (displayed_error != 0 || screen_changed)
+                LCD_UI_ShowRtcEdit(rtc_edit_digit);
+            displayed_error = 0;
+        }
+        else if (port_settings_screen != 0)
+        {
+            if (displayed_error != 0)
+                LCD_UI_ShowPortSettings(port_settings_screen);
+            displayed_error = 0;
+            if (customer_value_refresh_timer >=
+                (CUSTOMER_VALUE_REFRESH_TICKS - 1))
+            {
+                customer_value_refresh_timer = 0;
+                LCD_UI_ShowPortSettings(port_settings_screen);
+            }
+            else
+            {
+                customer_value_refresh_timer++;
+            }
         }
         else
         {
+            if (displayed_error != 0)
+            {
+                customer_display_timer = 0;
+                customer_value_refresh_timer = 0;
+                LCD_UI_ShowCustomerScreen(customer_display_screen);
+            }
+            displayed_error = 0;
             if ((prepaid_events & PREPAID_UI_EVENT_COMPANY) &&
                 customer_display_screen == LCD_UI_SCREEN_1_CUSTOMER_ID)
             {

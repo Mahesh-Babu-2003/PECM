@@ -110,7 +110,8 @@
 #define METER_DISCONNECT_TIMESTAMP_HOUR_OFFSET  82
 #define METER_DISCONNECT_TIMESTAMP_MINUTE_OFFSET 83
 #define METER_DISCONNECT_TIMESTAMP_SECOND_OFFSET 84
-#define RESERVED_FIRST_OFFSET           85
+#define OVERLOAD_DISCONNECT_ACTIVE_OFFSET 85
+#define RESERVED_FIRST_OFFSET             86
 
 #define BILLING_MODE_KWH            0
 #define BILLING_MODE_KVAH           1
@@ -170,6 +171,7 @@ extern volatile uint8_t prepaid_ui_events;
 
 void RS485_TestInit(void);
 void RS485_Poll(void);
+void RS485_ClearErrorFlags(void);
 void RS485_UpdateLoadControlClock(void);
 void RS485_UpdateLiveRtcRegisters(void);
 /* Returns 1 when a saved event time is available. */

@@ -1,12 +1,12 @@
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 1   
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE LCD_UI
 OBJECT MODULE PLACED IN .\Output\lcd_ui.obj
-COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.EXE src\lcd_ui.c LARGE OMF2 OPTIMIZE(7,SPEED) BROWSE INCDIR(.\src;vendo
-                    -r\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_
-                    -MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\lcd_ui.lst) TABS(2) OBJECT(.\
-                    -Output\lcd_ui.obj)
+COMPILER INVOKED BY: D:\Applications\C51\BIN\C51.EXE src\lcd_ui.c LARGE OMF2 OPTIMIZE(7,SIZE) BROWSE INCDIR(.\src;vendor
+                    -\MS51_BSP\MS51FC0AE_MS51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\Device\Include;vendor\MS51_BSP\MS51FC0AE_M
+                    -S51XC0BE_MS51EB0AE_MS51EC0AE_MS51TC0AE_MS51PC0AE\Library\StdDriver\inc) DEBUG PRINT(.\lst\lcd_ui.lst) TABS(2) OBJECT(.\O
+                    -utput\lcd_ui.obj)
 
 line level    source
 
@@ -62,7 +62,7 @@ line level    source
   50          
   51          static void LCD_UI_PadLine(uint8_t row, uint8_t used)
   52          {
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 2   
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 2   
 
   53   1          if (used >= 16) return;
   54   1          LCD_SetCursor(row, used);
@@ -126,7 +126,7 @@ line level    source
  112   1          uint8_t used;
  113   1          LCD_Command(0x0C);
  114   1          LCD_SetCursor(0, 0);
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 3   
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 3   
 
  115   1          switch (screen_number)
  116   1          {
@@ -190,7 +190,7 @@ line level    source
  174   1      }
  175          
  176          static void LCD_UI_ShowLowBalanceThreshold(void)
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 4   
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 4   
 
  177          {
  178   1          uint8_t used;
@@ -254,7 +254,7 @@ line level    source
  235   1          used = (uint8_t)(7 + LCD_UI_WriteUnsignedLong(value));
  236   1          LCD_UI_PadLine(1, used);
  237   1      }
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 5   
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 5   
 
  238          
  239          static void LCD_UI_ShowLastRecharge(void)
@@ -318,7 +318,7 @@ line level    source
  297   1          LCD_UI_PadLine(0, used); LCD_SetCursor(1, 0);
  298   1          if (available)
  299   1          {
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 6   
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 6   
 
  300   2              LCD_WriteText("Time:");
  301   2              LCD_UI_WriteTwoDigits(timestamp.hours);
@@ -336,106 +336,159 @@ line level    source
  313   1          LCD_UI_PadLine(1, used);
  314   1      }
  315          
- 316          void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
+ 316          void LCD_UI_ShowPortSettings(uint8_t screen_number)
  317          {
- 318   1          switch (screen_number)
- 319   1          {
- 320   2              case LCD_UI_SCREEN_1_CUSTOMER_ID: LCD_UI_ShowCompanyName(); break;
- 321   2              case LCD_UI_SCREEN_2_BALANCE: LCD_UI_ShowBalance(); break;
- 322   2              case LCD_UI_SCREEN_3_LOAD_STATUS: LCD_UI_ShowLoadStatus(); break;
- 323   2              case LCD_UI_SCREEN_4_MAIN_KWH_RATE:
- 324   2              case LCD_UI_SCREEN_5_MAIN_KVAH_RATE:
- 325   2              case LCD_UI_SCREEN_6_DG_KWH_RATE:
- 326   2              case LCD_UI_SCREEN_7_DG_KVAH_RATE:
- 327   2              case LCD_UI_SCREEN_8_SOLAR_KWH_RATE:
- 328   2              case LCD_UI_SCREEN_9_SOLAR_KVAH_RATE:
- 329   2                  LCD_UI_ShowRateScreen(screen_number); break;
- 330   2              case LCD_UI_SCREEN_10_LOW_BALANCE_ALERT:
- 331   2                  LCD_UI_ShowLowBalanceAlert(); break;
- 332   2              case LCD_UI_SCREEN_11_LOW_BALANCE_LIMIT:
- 333   2                  LCD_UI_ShowLowBalanceThreshold(); break;
- 334   2              case LCD_UI_SCREEN_12_DISCONNECT_LIMIT:
- 335   2                  LCD_UI_ShowDisconnectLimit(); break;
- 336   2              case LCD_UI_SCREEN_13_TAMPER_EVENT:
- 337   2                  LCD_UI_ShowTamperEvent(); break;
- 338   2              case LCD_UI_SCREEN_14_BMS_OVERRIDE:
- 339   2                  LCD_UI_ShowBmsOverride(); break;
- 340   2              case LCD_UI_SCREEN_15_BILLING_PARAMETER:
- 341   2                  LCD_UI_ShowBillingParameter(); break;
- 342   2              case LCD_UI_SCREEN_16_LAST_RECHARGE:
- 343   2                  LCD_UI_ShowLastRecharge(); break;
- 344   2              case LCD_UI_SCREEN_17_TOTAL_DEDUCTED:
- 345   2                  LCD_UI_ShowTotalDeducted(); break;
- 346   2              case LCD_UI_SCREEN_18_METER_DISCONNECT:
- 347   2                  LCD_UI_ShowMeterDisconnect(); break;
- 348   2              default:
- 349   2                  LCD_UI_ShowConsumptionFlag(); break;
- 350   2          }
+ 318   1          uint32_t baud_rate;
+ 319   1          uint8_t parity;
+ 320   1          uint8_t slave_id;
+ 321   1          uint8_t port;
+ 322   1          uint8_t settings_offset;
+ 323   1          uint8_t used;
+ 324   1      
+ 325   1          if (screen_number < 1 || screen_number > LCD_UI_PORT_SETTINGS_SCREEN_COUNT)
+ 326   1              return;
+ 327   1      
+ 328   1          port = screen_number;
+ 329   1          settings_offset = (port == 1) ? SLAVE_PORT1_BAUD_OFFSET :
+ 330   1              SLAVE_PORT2_BAUD_OFFSET;
+ 331   1          baud_rate = slave_holding_registers[settings_offset];
+ 332   1          parity = (uint8_t)slave_holding_registers[settings_offset + 1];
+ 333   1          slave_id = (uint8_t)slave_holding_registers[settings_offset + 2];
+ 334   1          if (baud_rate == 65535UL) baud_rate = 115200UL;
+ 335   1      
+ 336   1          LCD_Command(0x0C);
+ 337   1          LCD_SetCursor(0, 0);
+ 338   1          LCD_WriteText((port == 1) ? "OUT Bd: " : "IN Bd: ");
+ 339   1          used = (uint8_t)((port == 1 ? 8 : 7) +
+ 340   1              LCD_UI_WriteUnsignedLong(baud_rate));
+ 341   1          LCD_UI_PadLine(0, used);
+ 342   1          LCD_SetCursor(1, 0);
+ 343   1          LCD_WriteText("P:");
+ 344   1          used = 2;
+ 345   1          if (parity == 0) { LCD_WriteText("None"); used += 4; }
+ 346   1          else if (parity == 1) { LCD_WriteText("Even"); used += 4; }
+ 347   1          else { LCD_WriteText("Odd"); used += 3; }
+ 348   1          LCD_WriteText(" ID:");
+ 349   1          used = (uint8_t)(used + 4 + LCD_UI_WriteUnsignedLong(slave_id));
+ 350   1          LCD_UI_PadLine(1, used);
  351   1      }
  352          
- 353          uint8_t LCD_UI_NextCustomerScreen(uint8_t current_screen)
+ 353          void LCD_UI_ShowError(uint8_t error_number)
  354          {
- 355   1          uint8_t next = current_screen;
- 356   1          do
- 357   1          {
- 358   2              next++;
- 359   2              if (next > LCD_UI_SCREEN_COUNT) next = LCD_UI_SCREEN_1_CUSTOMER_ID;
- 360   2          } while (next == LCD_UI_SCREEN_10_LOW_BALANCE_ALERT &&
- 361   1              slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] != 1);
-C51 COMPILER V9.60.0.0   LCD_UI                                                            11/03/2026 16:42:10 PAGE 7   
+ 355   1          if (error_number < 1 || error_number > 4) return;
+ 356   1      
+ 357   1          LCD_Command(0x0C);
+ 358   1          LCD_SetCursor(0, 0);
+ 359   1          LCD_WriteText("                ");
+ 360   1          LCD_SetCursor(1, 0);
+ 361   1          LCD_WriteText("                ");
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 7   
 
- 362   1          return next;
- 363   1      }
- 364          
- 365          void LCD_UI_ShowRtcEdit(uint8_t digit_index)
- 366          {
- 367   1          uint8_t row, column, time_digit;
- 368   1          LCD_Command(0x0C);
- 369   1          LCD_SetCursor(0, 0);
- 370   1          if (!rtc_datetime_valid)
- 371   1          {
- 372   2              LCD_WriteText("RTC READ FAILED ");
- 373   2              LCD_SetCursor(1, 0); LCD_WriteText("CHECK RTC/I2C   ");
- 374   2              return;
- 375   2          }
- 376   1          LCD_WriteText("DATE: ");
- 377   1          LCD_WriteChar((char)('0' + (rtc_datetime.day / 10)));
- 378   1          LCD_WriteChar((char)('0' + (rtc_datetime.day % 10))); LCD_WriteChar(':');
- 379   1          LCD_WriteChar((char)('0' + (rtc_datetime.month / 10)));
- 380   1          LCD_WriteChar((char)('0' + (rtc_datetime.month % 10))); LCD_WriteChar(':');
- 381   1          LCD_WriteChar((char)('0' + ((rtc_datetime.year / 1000) % 10)));
- 382   1          LCD_WriteChar((char)('0' + ((rtc_datetime.year / 100) % 10)));
- 383   1          LCD_WriteChar((char)('0' + ((rtc_datetime.year / 10) % 10)));
- 384   1          LCD_WriteChar((char)('0' + (rtc_datetime.year % 10)));
- 385   1          LCD_SetCursor(1, 0); LCD_WriteText("TIME: ");
- 386   1          LCD_WriteChar((char)('0' + (rtc_datetime.hours / 10)));
- 387   1          LCD_WriteChar((char)('0' + (rtc_datetime.hours % 10))); LCD_WriteChar(':');
- 388   1          LCD_WriteChar((char)('0' + (rtc_datetime.minutes / 10)));
- 389   1          LCD_WriteChar((char)('0' + (rtc_datetime.minutes % 10))); LCD_WriteChar(':');
- 390   1          LCD_WriteChar((char)('0' + (rtc_datetime.seconds / 10)));
- 391   1          LCD_WriteChar((char)('0' + (rtc_datetime.seconds % 10)));
- 392   1          if (digit_index < 8)
- 393   1          {
- 394   2              row = 0;
- 395   2              if (digit_index < 2) column = (uint8_t)(6 + digit_index);
- 396   2              else if (digit_index < 4) column = (uint8_t)(7 + digit_index);
- 397   2              else column = (uint8_t)(8 + digit_index);
- 398   2          }
- 399   1          else
- 400   1          {
- 401   2              row = 1; time_digit = (uint8_t)(digit_index - 8);
- 402   2              if (time_digit < 2) column = (uint8_t)(6 + time_digit);
- 403   2              else if (time_digit < 4) column = (uint8_t)(7 + time_digit);
- 404   2              else column = (uint8_t)(8 + time_digit);
- 405   2          }
- 406   1          LCD_Command(0x0F); LCD_SetCursor(row, column);
- 407   1      }
+ 362   1          LCD_SetCursor(0, 6);
+ 363   1          LCD_WriteText("ER0");
+ 364   1          LCD_WriteChar((char)('0' + error_number));
+ 365   1      }
+ 366          
+ 367          void LCD_UI_ShowCustomerScreen(uint8_t screen_number)
+ 368          {
+ 369   1          switch (screen_number)
+ 370   1          {
+ 371   2              case LCD_UI_SCREEN_1_CUSTOMER_ID: LCD_UI_ShowCompanyName(); break;
+ 372   2              case LCD_UI_SCREEN_2_BALANCE: LCD_UI_ShowBalance(); break;
+ 373   2              case LCD_UI_SCREEN_3_LOAD_STATUS: LCD_UI_ShowLoadStatus(); break;
+ 374   2              case LCD_UI_SCREEN_4_MAIN_KWH_RATE:
+ 375   2              case LCD_UI_SCREEN_5_MAIN_KVAH_RATE:
+ 376   2              case LCD_UI_SCREEN_6_DG_KWH_RATE:
+ 377   2              case LCD_UI_SCREEN_7_DG_KVAH_RATE:
+ 378   2              case LCD_UI_SCREEN_8_SOLAR_KWH_RATE:
+ 379   2              case LCD_UI_SCREEN_9_SOLAR_KVAH_RATE:
+ 380   2                  LCD_UI_ShowRateScreen(screen_number); break;
+ 381   2              case LCD_UI_SCREEN_10_LOW_BALANCE_ALERT:
+ 382   2                  LCD_UI_ShowLowBalanceAlert(); break;
+ 383   2              case LCD_UI_SCREEN_11_LOW_BALANCE_LIMIT:
+ 384   2                  LCD_UI_ShowLowBalanceThreshold(); break;
+ 385   2              case LCD_UI_SCREEN_12_DISCONNECT_LIMIT:
+ 386   2                  LCD_UI_ShowDisconnectLimit(); break;
+ 387   2              case LCD_UI_SCREEN_13_TAMPER_EVENT:
+ 388   2                  LCD_UI_ShowTamperEvent(); break;
+ 389   2              case LCD_UI_SCREEN_14_BMS_OVERRIDE:
+ 390   2                  LCD_UI_ShowBmsOverride(); break;
+ 391   2              case LCD_UI_SCREEN_15_BILLING_PARAMETER:
+ 392   2                  LCD_UI_ShowBillingParameter(); break;
+ 393   2              case LCD_UI_SCREEN_16_LAST_RECHARGE:
+ 394   2                  LCD_UI_ShowLastRecharge(); break;
+ 395   2              case LCD_UI_SCREEN_17_TOTAL_DEDUCTED:
+ 396   2                  LCD_UI_ShowTotalDeducted(); break;
+ 397   2              case LCD_UI_SCREEN_18_METER_DISCONNECT:
+ 398   2                  LCD_UI_ShowMeterDisconnect(); break;
+ 399   2              default:
+ 400   2                  LCD_UI_ShowConsumptionFlag(); break;
+ 401   2          }
+ 402   1      }
+ 403          
+ 404          uint8_t LCD_UI_NextCustomerScreen(uint8_t current_screen)
+ 405          {
+ 406   1          uint8_t next = current_screen;
+ 407   1          do
+ 408   1          {
+ 409   2              next++;
+ 410   2              if (next > LCD_UI_SCREEN_COUNT) next = LCD_UI_SCREEN_1_CUSTOMER_ID;
+ 411   2          } while (next == LCD_UI_SCREEN_10_LOW_BALANCE_ALERT &&
+ 412   1              slave_holding_registers[LOW_BALANCE_ALERT_OFFSET] != 1);
+ 413   1          return next;
+ 414   1      }
+ 415          
+ 416          void LCD_UI_ShowRtcEdit(uint8_t digit_index)
+ 417          {
+ 418   1          uint8_t row, column, time_digit;
+ 419   1          LCD_Command(0x0C);
+ 420   1          LCD_SetCursor(0, 0);
+ 421   1          if (!rtc_datetime_valid)
+ 422   1          {
+ 423   2              LCD_WriteText("RTC READ FAILED ");
+C51 COMPILER V9.60.0.0   LCD_UI                                                            11/05/2026 12:10:42 PAGE 8   
+
+ 424   2              LCD_SetCursor(1, 0); LCD_WriteText("CHECK RTC/I2C   ");
+ 425   2              return;
+ 426   2          }
+ 427   1          LCD_WriteText("DATE: ");
+ 428   1          LCD_WriteChar((char)('0' + (rtc_datetime.day / 10)));
+ 429   1          LCD_WriteChar((char)('0' + (rtc_datetime.day % 10))); LCD_WriteChar(':');
+ 430   1          LCD_WriteChar((char)('0' + (rtc_datetime.month / 10)));
+ 431   1          LCD_WriteChar((char)('0' + (rtc_datetime.month % 10))); LCD_WriteChar(':');
+ 432   1          LCD_WriteChar((char)('0' + ((rtc_datetime.year / 1000) % 10)));
+ 433   1          LCD_WriteChar((char)('0' + ((rtc_datetime.year / 100) % 10)));
+ 434   1          LCD_WriteChar((char)('0' + ((rtc_datetime.year / 10) % 10)));
+ 435   1          LCD_WriteChar((char)('0' + (rtc_datetime.year % 10)));
+ 436   1          LCD_SetCursor(1, 0); LCD_WriteText("TIME: ");
+ 437   1          LCD_WriteChar((char)('0' + (rtc_datetime.hours / 10)));
+ 438   1          LCD_WriteChar((char)('0' + (rtc_datetime.hours % 10))); LCD_WriteChar(':');
+ 439   1          LCD_WriteChar((char)('0' + (rtc_datetime.minutes / 10)));
+ 440   1          LCD_WriteChar((char)('0' + (rtc_datetime.minutes % 10))); LCD_WriteChar(':');
+ 441   1          LCD_WriteChar((char)('0' + (rtc_datetime.seconds / 10)));
+ 442   1          LCD_WriteChar((char)('0' + (rtc_datetime.seconds % 10)));
+ 443   1          if (digit_index < 8)
+ 444   1          {
+ 445   2              row = 0;
+ 446   2              if (digit_index < 2) column = (uint8_t)(6 + digit_index);
+ 447   2              else if (digit_index < 4) column = (uint8_t)(7 + digit_index);
+ 448   2              else column = (uint8_t)(8 + digit_index);
+ 449   2          }
+ 450   1          else
+ 451   1          {
+ 452   2              row = 1; time_digit = (uint8_t)(digit_index - 8);
+ 453   2              if (time_digit < 2) column = (uint8_t)(6 + time_digit);
+ 454   2              else if (time_digit < 4) column = (uint8_t)(7 + time_digit);
+ 455   2              else column = (uint8_t)(8 + time_digit);
+ 456   2          }
+ 457   1          LCD_Command(0x0F); LCD_SetCursor(row, column);
+ 458   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   2804    ----
-   CONSTANT SIZE    =    452    ----
-   XDATA SIZE       =   ----      76
+   CODE SIZE        =   3136    ----
+   CONSTANT SIZE    =    512    ----
+   XDATA SIZE       =   ----      85
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
    IDATA SIZE       =   ----    ----

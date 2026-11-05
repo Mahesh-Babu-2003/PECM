@@ -7,6 +7,16 @@ latching relays and exposes independent
 communication settings for both RS-485 ports.
 The onboard 16x2 LCD, driven through 74HC595 U3, cycles through the customer ID
 and selected prepaid load and balance values.
+To view communication settings without interrupting the normal display,
+press and hold SW2 and SW3 together for 5 seconds. Press SW1 to switch between
+the port 1 and port 2 settings pages; each page shows baud rate, parity, and
+slave ID. Hold SW2 and SW3 together for 5 seconds again to return to the normal
+configuration display.
+When a fault is active, its code replaces the normal LCD screens: `ER01` is
+Port 2 communication loss, `ER02` is the relay/consumption-disconnect flag,
+`ER03` is an RTC error, and `ER04` is a meter EEPROM error. If multiple faults
+are active, the LCD shows the lowest-numbered code; it returns to the previous
+display when that fault clears.
 
 ## Modbus and LCD data
 
